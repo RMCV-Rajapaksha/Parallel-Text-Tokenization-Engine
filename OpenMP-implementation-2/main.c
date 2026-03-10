@@ -4,41 +4,61 @@
 #include <ctype.h>
 #include <omp.h>
 
+#define MAX_TOKEN_LENGTH 100
+#define MAX_SYMBOL_LEN 50
 #define HASH_TABLE_SIZE 100003
-#define SAMPLE_TOKENS 20
+#define MAX_PAIRS 10000
+#define SAMPLE_WORDS 20
 
 
-// Data structures
-
-typedef struct TokenNode {
-    char *token;
-    int length;
-    long long frequency;
-    struct TokenNode *next;
-} TokenNode;
-
+// BPE word: a single vocabulary entry split into symbols
 typedef struct {
-    TokenNode **buckets;
-    int size;
-    int unique_tokens;
-    long long total_tokens;
-} HashTable;
+    char **symbols;
+    int num_symbols;
+    int frequency;
+} BPEWord;
 
+// BPE vocabulary: all unique words and their symbol sequences
 typedef struct {
-    long start;
-    int length;
-} TokenSpan;
+    BPEWord *words;
+    int vocab_size;
+} BPEVocab;
 
+// Best adjacent symbol pair found during a merge round
 typedef struct {
-    TokenSpan *items;
-    long long count;
-    long long capacity;
-} SpanArray;
+    char left[MAX_SYMBOL_LEN];
+    char right[MAX_SYMBOL_LEN];
+    int frequency;
+} BestPair;
+
+// Hash table node for word frequency counting
+typedef struct WordNode {
+    char *word;
+    int frequency;
+    struct WordNode *next;
+} WordNode;
+
+// Vocab index node for fast word lookup
+typedef struct VocabIndexNode {
+    char *key;
+    int vocab_idx;
+    struct VocabIndexNode *next;
+} VocabIndexNode;
+
+// Vocab index for O(1) word-to-vocab lookup
+typedef struct {
+    VocabIndexNode **buckets;
+} VocabIndex;
 
 
-// Check whether a character belongs to a token
-static int is_token_char(unsigned char c) {
-    return isalnum(c) || c == '\'' || c == '_';
+// Hash function (djb2 algorithm)
+static unsigned int hash_function(const char *str, int table_size) {
+    unsigned long hash = 5381;
+    int c;
+    while ((c = (unsigned char)*str++)) {
+        hash = ((hash << 5) + hash) + c;
+    }
+    return (unsigned int)(hash % table_size);
 }
 
 
@@ -75,391 +95,464 @@ static char *read_file(const char *filename, long *file_size) {
 }
 
 
-// Hash function for a token slice (lowercased)
-static unsigned int hash_token_slice(const char *token, int length, int table_size) {
-    unsigned long hash = 5381;
-
-    for (int i = 0; i < length; i++) {
-        unsigned char c = (unsigned char)token[i];
-        hash = ((hash << 5) + hash) + (unsigned char)tolower(c);
-    }
-
-    return (unsigned int)(hash % table_size);
-}
-
-
-// Create hash table
-static HashTable *create_hash_table(int size) {
-    HashTable *ht = (HashTable *)malloc(sizeof(HashTable));
-    if (!ht) return NULL;
-
-    ht->buckets = (TokenNode **)calloc(size, sizeof(TokenNode *));
-    if (!ht->buckets) {
-        free(ht);
-        return NULL;
-    }
-
-    ht->size = size;
-    ht->unique_tokens = 0;
-    ht->total_tokens = 0;
-    return ht;
-}
-
-
-// Compare stored token with a token slice
-static int token_equals_slice(const TokenNode *node, const char *token, int length) {
-    if (node->length != length) return 0;
-
-    for (int i = 0; i < length; i++) {
-        if (node->token[i] != (char)tolower((unsigned char)token[i])) {
-            return 0;
-        }
-    }
-
-    return 1;
-}
-
-
-// Insert token slice with a given count
-static void insert_token_slice_with_count(HashTable *ht, const char *token, int length, long long count) {
-    if (ht == NULL || token == NULL || length <= 0 || count <= 0) return;
-
-    unsigned int index = hash_token_slice(token, length, ht->size);
-    TokenNode *current = ht->buckets[index];
-
-    while (current != NULL) {
-        if (token_equals_slice(current, token, length)) {
-            current->frequency += count;
-            ht->total_tokens += count;
-            return;
-        }
-        current = current->next;
-    }
-
-    TokenNode *new_node = (TokenNode *)malloc(sizeof(TokenNode));
-    if (!new_node) return;
-
-    new_node->token = (char *)malloc((size_t)length + 1);
-    if (!new_node->token) {
-        free(new_node);
-        return;
-    }
-
-    for (int i = 0; i < length; i++) {
-        new_node->token[i] = (char)tolower((unsigned char)token[i]);
-    }
-    new_node->token[length] = '\0';
-
-    new_node->length = length;
-    new_node->frequency = count;
-    new_node->next = ht->buckets[index];
-    ht->buckets[index] = new_node;
-
-    ht->unique_tokens++;
-    ht->total_tokens += count;
-}
-
-
-// Free hash table
-static void free_hash_table(HashTable *ht) {
-    if (!ht) return;
-
-    for (int i = 0; i < ht->size; i++) {
-        TokenNode *current = ht->buckets[i];
-        while (current != NULL) {
-            TokenNode *temp = current;
-            current = current->next;
-            free(temp->token);
-            free(temp);
-        }
-    }
-
-    free(ht->buckets);
-    free(ht);
-}
-
-
-// Find a token node using a lowercase token string
-static TokenNode *find_token_node(HashTable *ht, const char *token, int length) {
-    if (!ht || !token || length <= 0) return NULL;
-
-    unsigned int index = hash_token_slice(token, length, ht->size);
-    TokenNode *current = ht->buckets[index];
-
-    while (current != NULL) {
-        if (current->length == length && memcmp(current->token, token, (size_t)length) == 0) {
-            return current;
-        }
-        current = current->next;
-    }
-
-    return NULL;
-}
-
-
-// Compare two hash tables for correctness
-static int compare_hash_tables(HashTable *a, HashTable *b) {
-    if (!a || !b) return 0;
-    if (a->total_tokens != b->total_tokens) return 0;
-    if (a->unique_tokens != b->unique_tokens) return 0;
-
-    for (int i = 0; i < a->size; i++) {
-        TokenNode *current = a->buckets[i];
-        while (current != NULL) {
-            TokenNode *other = find_token_node(b, current->token, current->length);
-            if (other == NULL || other->frequency != current->frequency) {
-                return 0;
-            }
-            current = current->next;
-        }
-    }
-
-    return 1;
-}
-
-
-// Initialize span array
-static void init_span_array(SpanArray *arr) {
-    arr->items = NULL;
-    arr->count = 0;
-    arr->capacity = 0;
-}
-
-
-// Append one token span
-static int push_span(SpanArray *arr, long start, int length) {
-    if (arr->count == arr->capacity) {
-        long long new_capacity = (arr->capacity == 0) ? 1024 : arr->capacity * 2;
-        TokenSpan *new_items = (TokenSpan *)realloc(arr->items, (size_t)new_capacity * sizeof(TokenSpan));
-        if (!new_items) {
-            return 0;
-        }
-        arr->items = new_items;
-        arr->capacity = new_capacity;
-    }
-
-    arr->items[arr->count].start = start;
-    arr->items[arr->count].length = length;
-    arr->count++;
-    return 1;
-}
-
-
-// Free span array
-static void free_span_array(SpanArray *arr) {
-    if (!arr) return;
-    free(arr->items);
-    arr->items = NULL;
-    arr->count = 0;
-    arr->capacity = 0;
-}
-
-
-// Sort token spans by original position
-static int compare_spans(const void *a, const void *b) {
-    const TokenSpan *left = (const TokenSpan *)a;
-    const TokenSpan *right = (const TokenSpan *)b;
-
-    if (left->start < right->start) return -1;
-    if (left->start > right->start) return 1;
-    return 0;
-}
-
-
-// Serial tokenization
-static HashTable *tokenize_serial(const char *content, long file_size, double *time_taken) {
-    double start_time = omp_get_wtime();
-    HashTable *ht = create_hash_table(HASH_TABLE_SIZE);
-    if (!ht) return NULL;
-
-    for (long i = 0; i < file_size; i++) {
-        unsigned char current = (unsigned char)content[i];
-        unsigned char previous = (i == 0) ? 0 : (unsigned char)content[i - 1];
-
-        if (is_token_char(current) && (i == 0 || !is_token_char(previous))) {
-            long j = i;
-            while (j < file_size && is_token_char((unsigned char)content[j])) {
-                j++;
-            }
-
-            insert_token_slice_with_count(ht, content + i, (int)(j - i), 1);
-            i = j - 1;
-        }
-    }
-
-    *time_taken = omp_get_wtime() - start_time;
-    return ht;
-}
-
-
-// Parallel tokenization using OpenMP
-static HashTable *tokenize_parallel(const char *content,
-                                    long file_size,
-                                    int requested_threads,
-                                    int *actual_threads,
-                                    TokenSpan **ordered_spans,
-                                    long long *ordered_count,
-                                    double *time_taken) {
+// Build word frequency table from text using OpenMP parallel word extraction
+static BPEVocab *build_vocab_parallel(const char *text, long file_size,
+                                      int requested_threads, int *actual_threads) {
     omp_set_num_threads(requested_threads);
 
-    SpanArray *thread_spans = (SpanArray *)calloc((size_t)requested_threads, sizeof(SpanArray));
-    if (!thread_spans) return NULL;
-
-    double start_time = omp_get_wtime();
+    // Each thread collects its own local hash table of word frequencies
+    WordNode ***thread_buckets = (WordNode ***)calloc(requested_threads, sizeof(WordNode **));
+    int *thread_unique = (int *)calloc(requested_threads, sizeof(int));
 
     #pragma omp parallel
     {
         int tid = omp_get_thread_num();
-        SpanArray local_spans;
-        init_span_array(&local_spans);
 
         #pragma omp single
         {
             *actual_threads = omp_get_num_threads();
         }
 
-        // Find token starts in parallel
+        // Allocate local hash table for this thread
+        WordNode **local_buckets = (WordNode **)calloc(HASH_TABLE_SIZE, sizeof(WordNode *));
+        thread_buckets[tid] = local_buckets;
+        int local_unique = 0;
+
+        // Each thread scans characters and finds word starts
         #pragma omp for schedule(static)
         for (long i = 0; i < file_size; i++) {
-            unsigned char current = (unsigned char)content[i];
-            unsigned char previous = (i == 0) ? 0 : (unsigned char)content[i - 1];
+            unsigned char c = (unsigned char)text[i];
+            unsigned char prev = (i == 0) ? ' ' : (unsigned char)text[i - 1];
 
-            if (is_token_char(current) && (i == 0 || !is_token_char(previous))) {
+            // Detect start of a word (non-space after space)
+            if (!isspace(c) && (i == 0 || isspace(prev))) {
+                char token[MAX_TOKEN_LENGTH];
+                int token_len = 0;
                 long j = i;
-                while (j < file_size && is_token_char((unsigned char)content[j])) {
-                    j++;
-                }
 
-                if (!push_span(&local_spans, i, (int)(j - i))) {
-                    fprintf(stderr, "Error: Token span allocation failed in thread %d\n", tid);
+                // Extract the full word
+                while (j < file_size && !isspace((unsigned char)text[j])
+                       && token_len < MAX_TOKEN_LENGTH - 1) {
+                    token[token_len++] = text[j++];
+                }
+                token[token_len] = '\0';
+
+                // Append end-of-word marker
+                char word_eow[MAX_TOKEN_LENGTH + 4];
+                snprintf(word_eow, sizeof(word_eow), "%s</w>", token);
+
+                // Insert into thread-local hash table
+                unsigned int idx = hash_function(word_eow, HASH_TABLE_SIZE);
+                WordNode *cur = local_buckets[idx];
+                int found = 0;
+                while (cur != NULL) {
+                    if (strcmp(cur->word, word_eow) == 0) {
+                        cur->frequency++;
+                        found = 1;
+                        break;
+                    }
+                    cur = cur->next;
+                }
+                if (!found) {
+                    WordNode *node = (WordNode *)malloc(sizeof(WordNode));
+                    node->word = strdup(word_eow);
+                    node->frequency = 1;
+                    node->next = local_buckets[idx];
+                    local_buckets[idx] = node;
+                    local_unique++;
                 }
             }
         }
 
-        thread_spans[tid] = local_spans;
+        thread_unique[tid] = local_unique;
     }
 
-    long long total_tokens = 0;
+    // Merge all thread-local hash tables into one global table
+    WordNode **global_buckets = (WordNode **)calloc(HASH_TABLE_SIZE, sizeof(WordNode *));
+    int global_unique = 0;
+
     for (int t = 0; t < *actual_threads; t++) {
-        total_tokens += thread_spans[t].count;
-    }
+        if (thread_buckets[t] == NULL) continue;
+        for (int b = 0; b < HASH_TABLE_SIZE; b++) {
+            WordNode *cur = thread_buckets[t][b];
+            while (cur != NULL) {
+                WordNode *next = cur->next;
 
-    TokenSpan *all_spans = NULL;
-    if (total_tokens > 0) {
-        all_spans = (TokenSpan *)malloc((size_t)total_tokens * sizeof(TokenSpan));
-        if (!all_spans) {
-            for (int t = 0; t < *actual_threads; t++) {
-                free_span_array(&thread_spans[t]);
+                unsigned int idx = hash_function(cur->word, HASH_TABLE_SIZE);
+                WordNode *gcur = global_buckets[idx];
+                int found = 0;
+                while (gcur != NULL) {
+                    if (strcmp(gcur->word, cur->word) == 0) {
+                        gcur->frequency += cur->frequency;
+                        found = 1;
+                        break;
+                    }
+                    gcur = gcur->next;
+                }
+
+                if (!found) {
+                    cur->next = global_buckets[idx];
+                    global_buckets[idx] = cur;
+                    global_unique++;
+                } else {
+                    free(cur->word);
+                    free(cur);
+                }
+
+                cur = next;
             }
-            free(thread_spans);
-            return NULL;
+        }
+        free(thread_buckets[t]);
+    }
+    free(thread_buckets);
+    free(thread_unique);
+
+    // Convert global hash table into BPEVocab (split each word into character symbols)
+    BPEVocab *vocab = (BPEVocab *)malloc(sizeof(BPEVocab));
+    vocab->words = (BPEWord *)malloc(global_unique * sizeof(BPEWord));
+    vocab->vocab_size = 0;
+
+    for (int b = 0; b < HASH_TABLE_SIZE; b++) {
+        WordNode *cur = global_buckets[b];
+        while (cur != NULL) {
+            int vi = vocab->vocab_size;
+            int len = (int)strlen(cur->word);
+
+            vocab->words[vi].symbols = (char **)malloc(len * sizeof(char *));
+            vocab->words[vi].num_symbols = 0;
+            vocab->words[vi].frequency = cur->frequency;
+
+            // Split word into individual characters, keeping </w> as one symbol
+            int pos = 0;
+            while (pos < len) {
+                if (pos + 3 < len && cur->word[pos] == '<' && cur->word[pos + 1] == '/'
+                    && cur->word[pos + 2] == 'w' && cur->word[pos + 3] == '>') {
+                    vocab->words[vi].symbols[vocab->words[vi].num_symbols] = strdup("</w>");
+                    vocab->words[vi].num_symbols++;
+                    pos += 4;
+                } else {
+                    char ch[2] = {cur->word[pos], '\0'};
+                    vocab->words[vi].symbols[vocab->words[vi].num_symbols] = strdup(ch);
+                    vocab->words[vi].num_symbols++;
+                    pos++;
+                }
+            }
+
+            vocab->vocab_size++;
+            WordNode *temp = cur;
+            cur = cur->next;
+            free(temp->word);
+            free(temp);
         }
     }
+    free(global_buckets);
 
-    long long offset = 0;
-    for (int t = 0; t < *actual_threads; t++) {
-        if (thread_spans[t].count > 0) {
-            memcpy(all_spans + offset,
-                   thread_spans[t].items,
-                   (size_t)thread_spans[t].count * sizeof(TokenSpan));
-            offset += thread_spans[t].count;
-        }
-        free_span_array(&thread_spans[t]);
-    }
-    free(thread_spans);
-
-    if (total_tokens > 1) {
-        qsort(all_spans, (size_t)total_tokens, sizeof(TokenSpan), compare_spans);
-    }
-
-    HashTable *ht = create_hash_table(HASH_TABLE_SIZE);
-    if (!ht) {
-        free(all_spans);
-        return NULL;
-    }
-
-    // Build string tokens from the character spans
-    for (long long i = 0; i < total_tokens; i++) {
-        insert_token_slice_with_count(ht,
-                                      content + all_spans[i].start,
-                                      all_spans[i].length,
-                                      1);
-    }
-
-    *ordered_spans = all_spans;
-    *ordered_count = total_tokens;
-    *time_taken = omp_get_wtime() - start_time;
-    return ht;
+    return vocab;
 }
 
 
-// Print first few generated tokens
-static void print_sample_tokens(const char *content, TokenSpan *spans, long long count) {
-    long long limit = (count < SAMPLE_TOKENS) ? count : SAMPLE_TOKENS;
+// Find the most frequent adjacent symbol pair using OpenMP
+static BestPair find_best_pair_parallel(BPEVocab *vocab) {
+    BestPair global_best = {"", "", 0};
 
-    printf("\nFirst %lld generated tokens:\n", limit);
-    for (long long i = 0; i < limit; i++) {
-        int length = spans[i].length;
-        if (length > 40) length = 40;
+    // Each thread tracks its own pair frequencies and finds a local best
+    #pragma omp parallel
+    {
+        char local_left[MAX_PAIRS][MAX_SYMBOL_LEN];
+        char local_right[MAX_PAIRS][MAX_SYMBOL_LEN];
+        int local_counts[MAX_PAIRS];
+        int local_unique = 0;
+        BestPair local_best = {"", "", 0};
 
-        printf("%3lld. ", i + 1);
-        for (int j = 0; j < length; j++) {
-            putchar(content[spans[i].start + j]);
+        memset(local_counts, 0, sizeof(local_counts));
+
+        // Distribute words across threads
+        #pragma omp for schedule(static)
+        for (int i = 0; i < vocab->vocab_size; i++) {
+            BPEWord *word = &vocab->words[i];
+
+            // Look at each adjacent symbol pair in this word
+            for (int j = 0; j < word->num_symbols - 1; j++) {
+                char *left = word->symbols[j];
+                char *right = word->symbols[j + 1];
+
+                // Search for this pair in local tracker
+                int found = 0;
+                for (int k = 0; k < local_unique; k++) {
+                    if (strcmp(local_left[k], left) == 0 &&
+                        strcmp(local_right[k], right) == 0) {
+                        local_counts[k] += word->frequency;
+                        found = 1;
+
+                        if (local_counts[k] > local_best.frequency) {
+                            strcpy(local_best.left, left);
+                            strcpy(local_best.right, right);
+                            local_best.frequency = local_counts[k];
+                        }
+                        break;
+                    }
+                }
+
+                if (!found && local_unique < MAX_PAIRS) {
+                    strcpy(local_left[local_unique], left);
+                    strcpy(local_right[local_unique], right);
+                    local_counts[local_unique] = word->frequency;
+
+                    if (local_counts[local_unique] > local_best.frequency) {
+                        strcpy(local_best.left, left);
+                        strcpy(local_best.right, right);
+                        local_best.frequency = local_counts[local_unique];
+                    }
+                    local_unique++;
+                }
+            }
         }
-        if (spans[i].length > 40) {
-            printf("...");
+
+        // Reduce: pick the global best across all threads
+        #pragma omp critical
+        {
+            if (local_best.frequency > global_best.frequency) {
+                global_best = local_best;
+            }
         }
-        printf("\n");
     }
+
+    return global_best;
+}
+
+
+// Merge the best pair across all vocabulary words using OpenMP
+static void merge_pair_parallel(BPEVocab *vocab, const char *left, const char *right) {
+    #pragma omp parallel for schedule(static)
+    for (int i = 0; i < vocab->vocab_size; i++) {
+        BPEWord *word = &vocab->words[i];
+
+        char **new_symbols = (char **)malloc(word->num_symbols * sizeof(char *));
+        int new_count = 0;
+
+        for (int j = 0; j < word->num_symbols; j++) {
+            // Check if current + next symbol match the target pair
+            if (j < word->num_symbols - 1 &&
+                strcmp(word->symbols[j], left) == 0 &&
+                strcmp(word->symbols[j + 1], right) == 0) {
+
+                // Merge the two symbols into one (e.g. "e" + "r" -> "er")
+                char merged[MAX_SYMBOL_LEN * 2];
+                strcpy(merged, left);
+                strcat(merged, right);
+
+                new_symbols[new_count] = strdup(merged);
+                new_count++;
+                j++;            // Skip the next symbol
+            } else {
+                new_symbols[new_count] = strdup(word->symbols[j]);
+                new_count++;
+            }
+        }
+
+        // Free old symbols and assign new ones
+        for (int j = 0; j < word->num_symbols; j++) {
+            free(word->symbols[j]);
+        }
+        free(word->symbols);
+
+        word->symbols = new_symbols;
+        word->num_symbols = new_count;
+    }
+}
+
+
+// Train BPE by performing iterative merges
+static void train_bpe_parallel(BPEVocab *vocab, int target_merges) {
+    printf("Starting BPE Training for %d merges...\n", target_merges);
+
+    for (int i = 0; i < target_merges; i++) {
+        BestPair best = find_best_pair_parallel(vocab);
+
+        if (best.frequency == 0) {
+            printf("Training stopped: No more pairs to merge.\n");
+            break;
+        }
+
+        printf("Merge %d: '%s' + '%s' (Frequency: %d)\n",
+               i + 1, best.left, best.right, best.frequency);
+
+        merge_pair_parallel(vocab, best.left, best.right);
+    }
+
+    printf("BPE Training Complete.\n");
+}
+
+
+// Build a lookup index for fast word->vocab mapping
+static VocabIndex *build_vocab_index(BPEVocab *vocab) {
+    VocabIndex *vi = (VocabIndex *)malloc(sizeof(VocabIndex));
+    vi->buckets = (VocabIndexNode **)calloc(HASH_TABLE_SIZE, sizeof(VocabIndexNode *));
+
+    for (int i = 0; i < vocab->vocab_size; i++) {
+        // Reconstruct the full word from its symbols
+        char reconstructed[MAX_TOKEN_LENGTH * 2] = "";
+        for (int j = 0; j < vocab->words[i].num_symbols; j++) {
+            strcat(reconstructed, vocab->words[i].symbols[j]);
+        }
+
+        unsigned int h = hash_function(reconstructed, HASH_TABLE_SIZE);
+        VocabIndexNode *node = (VocabIndexNode *)malloc(sizeof(VocabIndexNode));
+        node->key = strdup(reconstructed);
+        node->vocab_idx = i;
+        node->next = vi->buckets[h];
+        vi->buckets[h] = node;
+    }
+
+    return vi;
+}
+
+
+// Look up a word in the vocab index
+static int vocab_index_lookup(VocabIndex *vi, const char *key) {
+    unsigned int h = hash_function(key, HASH_TABLE_SIZE);
+    VocabIndexNode *cur = vi->buckets[h];
+    while (cur != NULL) {
+        if (strcmp(cur->key, key) == 0) return cur->vocab_idx;
+        cur = cur->next;
+    }
+    return -1;
+}
+
+
+// Free vocab index
+static void free_vocab_index(VocabIndex *vi) {
+    if (!vi) return;
+    for (int i = 0; i < HASH_TABLE_SIZE; i++) {
+        VocabIndexNode *cur = vi->buckets[i];
+        while (cur != NULL) {
+            VocabIndexNode *tmp = cur;
+            cur = cur->next;
+            free(tmp->key);
+            free(tmp);
+        }
+    }
+    free(vi->buckets);
+    free(vi);
+}
+
+
+// Tokenize full text using trained BPE and count totals
+static void tokenize_text_bpe(const char *text, BPEVocab *vocab, VocabIndex *vi,
+                               int *total_words, int *total_subwords) {
+    char token[MAX_TOKEN_LENGTH];
+    int token_index = 0;
+    int i = 0;
+    *total_words = 0;
+    *total_subwords = 0;
+
+    while (text[i] != '\0') {
+        // Skip whitespace
+        while (text[i] != '\0' && isspace((unsigned char)text[i])) i++;
+
+        token_index = 0;
+        while (text[i] != '\0' && !isspace((unsigned char)text[i])
+               && token_index < MAX_TOKEN_LENGTH - 1) {
+            token[token_index++] = text[i++];
+        }
+
+        if (token_index > 0) {
+            token[token_index] = '\0';
+            (*total_words)++;
+
+            char word_eow[MAX_TOKEN_LENGTH + 4];
+            snprintf(word_eow, sizeof(word_eow), "%s</w>", token);
+
+            int idx = vocab_index_lookup(vi, word_eow);
+            if (idx >= 0) {
+                *total_subwords += vocab->words[idx].num_symbols;
+            }
+        }
+    }
+}
+
+
+// Count unique BPE subword tokens across the vocabulary
+static int count_unique_bpe_tokens(BPEVocab *vocab) {
+    char unique_tokens[10000][MAX_SYMBOL_LEN * 2];
+    int unique_count = 0;
+
+    for (int i = 0; i < vocab->vocab_size; i++) {
+        for (int j = 0; j < vocab->words[i].num_symbols; j++) {
+            int found = 0;
+            for (int k = 0; k < unique_count; k++) {
+                if (strcmp(unique_tokens[k], vocab->words[i].symbols[j]) == 0) {
+                    found = 1;
+                    break;
+                }
+            }
+            if (!found && unique_count < 10000) {
+                strcpy(unique_tokens[unique_count], vocab->words[i].symbols[j]);
+                unique_count++;
+            }
+        }
+    }
+    return unique_count;
+}
+
+
+// Print sample BPE tokenizations
+static void print_sample_tokenizations(BPEVocab *vocab, VocabIndex *vi) {
+    const char *sample_words[] = {"the", "of", "and", "to", "in", "is", "that", "it"};
+    int num_samples = 8;
+
+    printf("\n=== Sample BPE Tokenizations ===\n");
+    for (int i = 0; i < num_samples; i++) {
+        char word_eow[MAX_TOKEN_LENGTH + 4];
+        snprintf(word_eow, sizeof(word_eow), "%s</w>", sample_words[i]);
+
+        int idx = vocab_index_lookup(vi, word_eow);
+        if (idx >= 0) {
+            printf("  '%s' -> [", sample_words[i]);
+            for (int j = 0; j < vocab->words[idx].num_symbols; j++) {
+                printf("'%s'", vocab->words[idx].symbols[j]);
+                if (j < vocab->words[idx].num_symbols - 1) printf(", ");
+            }
+            printf("]\n");
+        } else {
+            printf("  '%s' -> [not found in vocab]\n", sample_words[i]);
+        }
+    }
+}
+
+
+// Free BPE vocabulary
+static void free_vocab(BPEVocab *vocab) {
+    if (!vocab) return;
+    for (int i = 0; i < vocab->vocab_size; i++) {
+        for (int j = 0; j < vocab->words[i].num_symbols; j++) {
+            free(vocab->words[i].symbols[j]);
+        }
+        free(vocab->words[i].symbols);
+    }
+    free(vocab->words);
+    free(vocab);
 }
 
 
 // Print performance summary
-static void print_statistics(HashTable *serial_ht,
-                             HashTable *parallel_ht,
-                             double serial_time,
-                             double parallel_time,
-                             int threads,
-                             long file_size,
-                             int correctness_ok) {
-    int empty_buckets = 0;
-    int max_chain = 0;
-
-    for (int i = 0; i < parallel_ht->size; i++) {
-        int chain_length = 0;
-        TokenNode *current = parallel_ht->buckets[i];
-        while (current != NULL) {
-            chain_length++;
-            current = current->next;
-        }
-        if (chain_length == 0) empty_buckets++;
-        if (chain_length > max_chain) max_chain = chain_length;
-    }
-
-    printf("\n=== OpenMP Parallel Text Tokenization Statistics ===\n");
+static void print_statistics(BPEVocab *vocab, int total_words, int total_subwords,
+                             int unique_bpe_tokens, int num_merges,
+                             double time_taken, int threads, long file_size) {
+    printf("\n=== OpenMP Parallel BPE Tokenization Statistics ===\n");
     printf("Threads used: %d\n", threads);
     printf("File size: %ld bytes\n", file_size);
-    printf("Total tokens: %lld\n", parallel_ht->total_tokens);
-    printf("Unique tokens: %d\n", parallel_ht->unique_tokens);
-    printf("Serial time: %.6f seconds\n", serial_time);
-    printf("Parallel time: %.6f seconds\n", parallel_time);
-
-    if (parallel_time > 0.0) {
-        printf("Parallel throughput: %.2f tokens/second\n", parallel_ht->total_tokens / parallel_time);
+    printf("Total words in text: %d\n", total_words);
+    printf("Unique words in vocabulary: %d\n", vocab->vocab_size);
+    printf("Number of BPE merges performed: %d\n", num_merges);
+    printf("Unique BPE tokens (subword units): %d\n", unique_bpe_tokens);
+    printf("Total subword tokens after BPE: %d\n", total_subwords);
+    if (total_words > 0) {
+        printf("Average subwords per word: %.2f\n", (double)total_subwords / total_words);
     }
-    if (parallel_time > 0.0 && serial_time > 0.0) {
-        printf("Speedup: %.2fx\n", serial_time / parallel_time);
-    }
-
-    printf("Correctness check against serial version: %s\n", correctness_ok ? "PASSED" : "FAILED");
-    printf("Hash table load factor: %.4f\n", (double)parallel_ht->unique_tokens / parallel_ht->size);
-    printf("Max collision chain: %d\n", max_chain);
-    printf("Empty buckets: %d (%.2f%%)\n",
-           empty_buckets,
-           (double)empty_buckets / parallel_ht->size * 100.0);
-
-    if (serial_ht->total_tokens != parallel_ht->total_tokens) {
-        printf("Warning: Serial and parallel token counts are different\n");
+    printf("Processing time: %.6f seconds\n", time_taken);
+    if (time_taken > 0.0) {
+        printf("Throughput: %.2f words/second\n", total_words / time_taken);
     }
 }
 
@@ -467,19 +560,28 @@ static void print_statistics(HashTable *serial_ht,
 //-------------------- MAIN -------------------- //
 
 int main(int argc, char *argv[]) {
-    if (argc < 2 || argc > 3) {
-        printf("Usage: %s <input_file> [num_threads]\n", argv[0]);
-        printf("Example: %s ../ptbdataset/ptb.train.txt 8\n", argv[0]);
+    if (argc < 2 || argc > 4) {
+        printf("Usage: %s <input_file> [num_threads] [num_merges]\n", argv[0]);
+        printf("Example: %s ../ptbdataset/ptb.train.txt 8 50\n", argv[0]);
         return 1;
     }
 
     const char *filename = argv[1];
-    int requested_threads = (argc == 3) ? atoi(argv[2]) : omp_get_max_threads();
+    int requested_threads = (argc >= 3) ? atoi(argv[2]) : omp_get_max_threads();
     if (requested_threads <= 0) {
         requested_threads = omp_get_max_threads();
     }
 
-    printf("\nOpenMP Parallel Text Tokenization Engine\n");
+    int num_merges = 50;            // Default number of BPE merges
+    if (argc == 4) {
+        num_merges = atoi(argv[3]);
+        if (num_merges <= 0) {
+            fprintf(stderr, "Error: num_merges must be a positive integer\n");
+            return 1;
+        }
+    }
+
+    printf("\nOpenMP Parallel BPE Tokenization Engine\n");
     printf("========================================\n");
     printf("Reading file: %s\n", filename);
 
@@ -488,55 +590,51 @@ int main(int argc, char *argv[]) {
     if (content == NULL) {
         return 1;
     }
+    printf("File size: %ld bytes\n", file_size);
 
-    // Serial baseline
-    double serial_time = 0.0;
-    HashTable *serial_ht = tokenize_serial(content, file_size, &serial_time);
-    if (serial_ht == NULL) {
-        fprintf(stderr, "Error: Serial tokenization failed\n");
-        free(content);
-        return 1;
-    }
+    double start_time = omp_get_wtime();
 
-    // OpenMP parallel tokenization
+    // Build vocabulary from text (parallel word extraction)
     int actual_threads = 0;
-    TokenSpan *ordered_spans = NULL;
-    long long ordered_count = 0;
-    double parallel_time = 0.0;
-
-    HashTable *parallel_ht = tokenize_parallel(content,
-                                               file_size,
-                                               requested_threads,
-                                               &actual_threads,
-                                               &ordered_spans,
-                                               &ordered_count,
-                                               &parallel_time);
-    if (parallel_ht == NULL) {
-        fprintf(stderr, "Error: Parallel tokenization failed\n");
-        free_hash_table(serial_ht);
+    printf("Building vocabulary...\n");
+    BPEVocab *vocab = build_vocab_parallel(content, file_size,
+                                           requested_threads, &actual_threads);
+    if (vocab == NULL) {
+        fprintf(stderr, "Error: Failed to build vocabulary\n");
         free(content);
         return 1;
     }
+    printf("Vocabulary built: %d unique words\n", vocab->vocab_size);
 
-    int correctness_ok = compare_hash_tables(serial_ht, parallel_ht);
+    // Train BPE (parallel pair finding and merging)
+    train_bpe_parallel(vocab, num_merges);
 
-    print_statistics(serial_ht,
-                     parallel_ht,
-                     serial_time,
-                     parallel_time,
-                     actual_threads,
-                     file_size,
-                     correctness_ok);
+    double end_time = omp_get_wtime();
+    double time_taken = end_time - start_time;
 
-    if (ordered_count > 0) {
-        print_sample_tokens(content, ordered_spans, ordered_count);
-    }
+    // Build vocab index for fast lookup
+    VocabIndex *vi = build_vocab_index(vocab);
 
-    free(ordered_spans);
-    free_hash_table(serial_ht);
-    free_hash_table(parallel_ht);
+    // Tokenize full text and count totals
+    int total_words = 0;
+    int total_subwords = 0;
+    tokenize_text_bpe(content, vocab, vi, &total_words, &total_subwords);
+
+    int unique_bpe_tokens = count_unique_bpe_tokens(vocab);
+
+    // Print performance summary
+    print_statistics(vocab, total_words, total_subwords,
+                     unique_bpe_tokens, num_merges,
+                     time_taken, actual_threads, file_size);
+
+    // Print sample tokenizations
+    print_sample_tokenizations(vocab, vi);
+
+    // Cleanup
     free(content);
+    free_vocab_index(vi);
+    free_vocab(vocab);
 
-    printf("\nTokenization completed successfully!\n");
+    printf("\nBPE Tokenization completed successfully!\n");
     return 0;
 }

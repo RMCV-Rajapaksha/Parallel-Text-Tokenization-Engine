@@ -48,14 +48,14 @@ static HashTable *create_hash_table(int size) {
     return ht;
 }
 
-static void insert_token(HashTable *ht, const char *token) {
+static void insert_token_with_count(HashTable *ht, const char *token, int count) {
     unsigned int index = hash_function(token, ht->size);
     TokenNode *current = ht->buckets[index];
 
     while (current != NULL) {
         if (strcmp(current->token, token) == 0) {
-            current->frequency++;
-            ht->total_tokens++;
+            current->frequency += count;
+            ht->total_tokens += count;
             return;
         }
         current = current->next;
@@ -71,20 +71,22 @@ static void insert_token(HashTable *ht, const char *token) {
     }
 
     strcpy(new_node->token, token);
-    new_node->frequency = 1;
+    new_node->frequency = count;
     new_node->next = ht->buckets[index];
     ht->buckets[index] = new_node;
     ht->unique_tokens++;
-    ht->total_tokens++;
+    ht->total_tokens += count;
+}
+
+static void insert_token(HashTable *ht, const char *token) {
+    insert_token_with_count(ht, token, 1);
 }
 
 static void merge_hash_tables(HashTable *dest, HashTable *src) {
     for (int i = 0; i < src->size; i++) {
         TokenNode *current = src->buckets[i];
         while (current != NULL) {
-            for (int k = 0; k < current->frequency; k++) {
-                insert_token(dest, current->token);
-            }
+            insert_token_with_count(dest, current->token, current->frequency);
             current = current->next;
         }
     }
@@ -138,6 +140,37 @@ static char *read_file(const char *filename, long *file_size) {
     return content;
 }
 
+static void print_statistics(HashTable *ht, double time_taken, int threads, long file_size) {
+    int empty_buckets = 0;
+    int max_chain = 0;
+
+    for (int i = 0; i < ht->size; i++) {
+        int chain_length = 0;
+        TokenNode *current = ht->buckets[i];
+        while (current != NULL) {
+            chain_length++;
+            current = current->next;
+        }
+        if (chain_length == 0) empty_buckets++;
+        if (chain_length > max_chain) max_chain = chain_length;
+    }
+
+    printf("\n=== OpenMP Parallel Tokenization Statistics ===\n");
+    printf("Threads used: %d\n", threads);
+    printf("File size: %ld bytes\n", file_size);
+    printf("Total tokens: %lld\n", ht->total_tokens);
+    printf("Unique tokens: %d\n", ht->unique_tokens);
+    printf("Processing time: %.6f seconds\n", time_taken);
+    if (time_taken > 0.0) {
+        printf("Throughput: %.2f tokens/second\n", ht->total_tokens / time_taken);
+    }
+    printf("Hash table load factor: %.4f\n", (double)ht->unique_tokens / ht->size);
+    printf("Max collision chain: %d\n", max_chain);
+    printf("Empty buckets: %d (%.2f%%)\n",
+           empty_buckets,
+           (double)empty_buckets / ht->size * 100.0);
+}
+
 int main(int argc, char *argv[]) {
     if (argc < 2 || argc > 3) {
         printf("Usage: %s <input_file> [num_threads]\n", argv[0]);
@@ -150,6 +183,10 @@ int main(int argc, char *argv[]) {
     if (requested_threads <= 0) {
         requested_threads = omp_get_max_threads();
     }
+
+    printf("\nOpenMP Parallel Text Tokenization Engine\n");
+    printf("========================================\n");
+    printf("Reading file: %s\n", filename);
 
     long file_size = 0;
     char *content = read_file(filename, &file_size);
@@ -230,16 +267,14 @@ int main(int argc, char *argv[]) {
     }
 
     double end_time = omp_get_wtime();
+    double time_taken = end_time - start_time;
 
-    printf("OpenMP Token Frequency Counter\n");
-    printf("=========================================\n");
-    printf("Threads used: %d\n", actual_threads);
-    printf("Total tokens: %lld\n", global_ht->total_tokens);
-    printf("Unique tokens: %d\n", global_ht->unique_tokens);
-    printf("Processing time: %.6f seconds\n", end_time - start_time);
+    print_statistics(global_ht, time_taken, actual_threads, file_size);
 
     free_hash_table(global_ht);
     free(local_tables);
     free(content);
+
+    printf("\nTokenization completed successfully!\n");
     return 0;
 }

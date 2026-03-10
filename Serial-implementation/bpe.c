@@ -146,7 +146,7 @@ void train_bpe(BPEVocab *vocab, int target_merges) {
     printf("BPE Training Complete.\n");
 }
 
-// Hash function (djb2 algorithm)
+// Hash function
 unsigned int hash_function(const char *str, int table_size) {
     unsigned long hash = 5381;
     int c;
@@ -155,7 +155,6 @@ unsigned int hash_function(const char *str, int table_size) {
     return hash % table_size;
 }
 
-// Read entire file into memory
 char* read_file_content(const char *filename, long *file_size) {
     FILE *file = fopen(filename, "r");
     if (file == NULL) {
@@ -288,7 +287,7 @@ BPEVocab* build_vocab(const char *text) {
     return vocab;
 }
 
-// Build a lookup index: maps reconstructed word string -> vocab index
+// Build a lookup index
 typedef struct VocabIndexNode {
     char *key;
     int vocab_idx;

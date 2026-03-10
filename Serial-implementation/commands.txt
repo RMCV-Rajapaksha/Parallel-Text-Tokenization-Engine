@@ -1,0 +1,3 @@
+cd Serial-implementation
+gcc -o bpe bpe.c -O2 -Wall
+./bpe.exe ../ptbdataset/ptb.train.txt

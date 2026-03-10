@@ -4,4 +4,15 @@ gcc -O2 -fopenmp -o openmp_tokenizer main.c
 
 ./openmp_tokenizer ../ptbdataset/ptb.train.txt 4
 ./openmp_tokenizer ../ptbdataset/ptb.train.txt 8
+
 ...
+
+gcc -O2 -fopenmp openmp_text_tokenizer.c -o openmp_text_tokenizer
+
+./openmp_text_tokenizer ../ptbdataset/ptb.train.txt 8
+
+...
+
+gcc -O2 -fopenmp -o openmp_tokenizer main.c
+
+./openmp_tokenizer ../ptbdataset/ptb.train.txt

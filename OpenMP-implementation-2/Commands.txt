@@ -1,0 +1,7 @@
+cd OpenMP-implementation-2
+
+gcc -O2 -fopenmp -o openmp_tokenizer main.c
+
+./openmp_tokenizer ../ptbdataset/ptb.train.txt 4
+./openmp_tokenizer ../ptbdataset/ptb.train.txt 8
+...

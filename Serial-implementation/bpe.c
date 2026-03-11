@@ -30,7 +30,7 @@ typedef struct {
 BestPair find_best_pair(BPEVocab *vocab) {
     BestPair best = {"", "", 0};
     
-    // Arrays to manually track pair frequencies (simplified for demonstration)
+    // Arrays to manually track pair frequencies
     char left_pairs[10000][MAX_SYMBOL_LEN];
     char right_pairs[10000][MAX_SYMBOL_LEN];
     int pair_counts[10000] = {0};
@@ -341,7 +341,6 @@ void free_vocab_index(VocabIndex *vi) {
     free(vi);
 }
 
-// Tokenize a single word using the trained BPE vocabulary
 void tokenize_word_bpe(const char *word, BPEVocab *vocab, VocabIndex *vi) {
     char word_with_eow[MAX_TOKEN_LENGTH + 4];
     snprintf(word_with_eow, sizeof(word_with_eow), "%s</w>", word);
@@ -359,7 +358,6 @@ void tokenize_word_bpe(const char *word, BPEVocab *vocab, VocabIndex *vi) {
     }
 }
 
-// Tokenize full text using trained BPE model
 void tokenize_text_bpe(const char *text, BPEVocab *vocab, VocabIndex *vi, int *total_tokens, int *total_subwords) {
     char token[MAX_TOKEN_LENGTH];
     int token_index = 0;
@@ -391,7 +389,6 @@ void tokenize_text_bpe(const char *text, BPEVocab *vocab, VocabIndex *vi, int *t
     }
 }
 
-// Count unique BPE tokens (subword units) across the vocabulary
 int count_unique_bpe_tokens(BPEVocab *vocab) {
     char unique_tokens[10000][MAX_SYMBOL_LEN * 2];
     int unique_count = 0;
@@ -414,7 +411,6 @@ int count_unique_bpe_tokens(BPEVocab *vocab) {
     return unique_count;
 }
 
-// Free BPE vocabulary memory
 void free_vocab(BPEVocab *vocab) {
     for (int i = 0; i < vocab->vocab_size; i++) {
         for (int j = 0; j < vocab->words[i].num_symbols; j++) {
@@ -450,7 +446,7 @@ int main(int argc, char *argv[]) {
     }
 
     const char *filename = argv[1];
-    int num_merges = 50; // default
+    int num_merges = 50; 
     if (argc == 3) {
         num_merges = atoi(argv[2]);
         if (num_merges <= 0) {

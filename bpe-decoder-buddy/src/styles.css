@@ -1,0 +1,71 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+@import url('https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Syne:wght@400;600;700;800&display=swap');
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-surface-2: var(--surface-2);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-border: var(--border);
+  --color-seq: var(--seq);
+  --color-omp: var(--omp);
+  --color-mpi: var(--mpi);
+  --color-cuda: var(--cuda);
+  --color-hybrid: var(--hybrid);
+  --font-display: 'Syne', sans-serif;
+  --font-mono: 'Space Mono', monospace;
+}
+
+:root {
+  --radius: 0.5rem;
+  --background: oklch(0.18 0.02 260);
+  --foreground: oklch(0.92 0.02 270);
+  --card: oklch(0.22 0.025 260);
+  --card-foreground: oklch(0.92 0.02 270);
+  --surface-2: oklch(0.26 0.028 260);
+  --primary: oklch(0.68 0.16 255);
+  --primary-foreground: oklch(0.98 0 0);
+  --muted: oklch(0.28 0.025 260);
+  --muted-foreground: oklch(0.62 0.04 260);
+  --accent: oklch(0.68 0.16 255);
+  --accent-foreground: oklch(0.98 0 0);
+  --border: oklch(0.32 0.03 260);
+  --input: oklch(0.26 0.028 260);
+  --ring: oklch(0.68 0.16 255);
+  --popover: oklch(0.22 0.025 260);
+  --popover-foreground: oklch(0.92 0.02 270);
+  --secondary: oklch(0.28 0.025 260);
+  --secondary-foreground: oklch(0.92 0.02 270);
+  --destructive: oklch(0.65 0.22 22);
+  --destructive-foreground: oklch(0.98 0 0);
+
+  --seq:   oklch(0.68 0.16 255);
+  --omp:   oklch(0.76 0.16 70);
+  --mpi:   oklch(0.72 0.14 155);
+  --cuda:  oklch(0.65 0.20 25);
+  --hybrid:oklch(0.68 0.20 305);
+}
+
+@layer base {
+  * { border-color: var(--color-border); }
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-mono);
+  }
+  h1,h2,h3,h4 { font-family: var(--font-display); }
+}

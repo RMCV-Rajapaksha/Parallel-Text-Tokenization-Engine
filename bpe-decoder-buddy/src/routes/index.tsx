@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { BPEDemo } from "@/components/BPEDemo";
 
 export const Route = createFileRoute("/")({
@@ -86,6 +86,14 @@ function Index() {
               {t}
             </span>
           ))}
+        </div>
+        <div className="mt-4">
+          <Link
+            to="/visualizer"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-[var(--seq)]/15 border border-[var(--seq)]/40 text-[var(--seq)] text-xs font-display font-bold uppercase tracking-wider hover:bg-[var(--seq)]/25 transition-colors"
+          >
+            Parallel Engine Visualizer →
+          </Link>
         </div>
       </header>
 

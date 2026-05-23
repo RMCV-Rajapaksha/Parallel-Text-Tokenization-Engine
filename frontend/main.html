@@ -1,0 +1,1639 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BPE Parallel Engine — Visualizer</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Syne:wght@400;600;700;800&display=swap');
+
+  :root {
+    --bg: #0b0e14;
+    --surface: #111520;
+    --surface2: #161b27;
+    --border: #1e2535;
+    --seq:   #4c8ef5;
+    --omp:   #f5a623;
+    --mpi:   #4caf7d;
+    --cuda:  #e05252;
+    --hybrid:#b06ef5;
+    --text:  #d4daf0;
+    --muted: #5a6585;
+    --accent:#4c8ef5;
+    --tag-h: 14px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Space Mono', monospace;
+    font-size: 13px;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── HEADER ── */
+  header {
+    padding: 28px 36px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: flex-end;
+    gap: 24px;
+    background: linear-gradient(180deg, #0d1220 0%, var(--bg) 100%);
+  }
+  header h1 {
+    font-family: 'Syne', sans-serif;
+    font-size: 22px;
+    font-weight: 800;
+    letter-spacing: -.5px;
+    color: #fff;
+    line-height: 1;
+  }
+  header h1 span { color: var(--seq); }
+  .header-sub {
+    font-size: 11px;
+    color: var(--muted);
+    line-height: 1.6;
+  }
+  .badge-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+  .badge {
+    font-size: 10px;
+    padding: 3px 8px;
+    border-radius: 3px;
+    font-weight: 700;
+    letter-spacing: .5px;
+    text-transform: uppercase;
+  }
+  .badge.seq   { background: #4c8ef520; color: var(--seq); border: 1px solid #4c8ef540; }
+  .badge.omp   { background: #f5a62320; color: var(--omp); border: 1px solid #f5a62340; }
+  .badge.mpi   { background: #4caf7d20; color: var(--mpi); border: 1px solid #4caf7d40; }
+  .badge.cuda  { background: #e0525220; color: var(--cuda);border: 1px solid #e0525240; }
+  .badge.hybrid{ background: #b06ef520; color: var(--hybrid);border:1px solid #b06ef540;}
+
+  /* ── TABS ── */
+  .tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--border);
+    padding: 0 36px;
+    background: var(--surface);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .tab {
+    padding: 14px 20px;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .8px;
+    text-transform: uppercase;
+    color: var(--muted);
+    border-bottom: 2px solid transparent;
+    transition: all .2s;
+    white-space: nowrap;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: #fff; border-bottom-color: var(--seq); }
+
+  /* ── LAYOUT ── */
+  .content { padding: 28px 36px; }
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  /* ── SECTION TITLES ── */
+  .section-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .section-title::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  /* ── CARDS ── */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  .card-header {
+    font-family: 'Syne', sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 14px;
+  }
+
+  /* ── GRID ── */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+  .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+
+  /* ── STAT TILES ── */
+  .stat-tile {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px 16px;
+    position: relative;
+    overflow: hidden;
+  }
+  .stat-tile::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+  }
+  .stat-tile.seq::before   { background: var(--seq); }
+  .stat-tile.omp::before   { background: var(--omp); }
+  .stat-tile.mpi::before   { background: var(--mpi); }
+  .stat-tile.cuda::before  { background: var(--cuda); }
+  .stat-tile.hybrid::before{ background: var(--hybrid); }
+  .stat-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .8px; }
+  .stat-value { font-family: 'Syne', sans-serif; font-size: 26px; font-weight: 800; color: #fff; margin: 4px 0 2px; line-height: 1; }
+  .stat-sub { font-size: 10px; color: var(--muted); }
+
+  /* ── CHART CANVAS ── */
+  .chart-wrap {
+    position: relative;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  canvas { display: block; width: 100% !important; }
+
+  /* ── UPLOAD ZONE ── */
+  .upload-zone {
+    border: 2px dashed var(--border);
+    border-radius: 8px;
+    padding: 40px;
+    text-align: center;
+    cursor: pointer;
+    transition: all .2s;
+    background: var(--surface2);
+  }
+  .upload-zone:hover, .upload-zone.drag { border-color: var(--seq); background: #4c8ef508; }
+  .upload-icon { font-size: 36px; margin-bottom: 12px; }
+  .upload-label { font-family: 'Syne', sans-serif; font-size: 14px; font-weight: 700; color: #fff; }
+  .upload-hint  { font-size: 11px; color: var(--muted); margin-top: 6px; }
+  #fileInput { display: none; }
+
+  /* ── TABLE ── */
+  .data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  .data-table th {
+    text-align: left;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: .8px;
+    font-weight: 700;
+  }
+  .data-table td {
+    padding: 9px 12px;
+    border-bottom: 1px solid #1a2030;
+    font-size: 12px;
+    color: var(--text);
+  }
+  .data-table tr:hover td { background: #151c2a; }
+  .merge-cell {
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    background: #1e2535;
+    padding: 2px 7px;
+    border-radius: 3px;
+    display: inline-block;
+  }
+  .merge-arrow { color: var(--seq); margin: 0 5px; }
+
+  /* ── TOKEN DISPLAY ── */
+  .token-word { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .tok {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 9px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 700;
+    position: relative;
+  }
+  .tok-colors { /* assigned via JS */ }
+  .tok-endofword {
+    font-size: 9px;
+    color: var(--muted);
+    padding: 2px 5px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: #0d1220;
+  }
+
+  /* ── INPUT ROW ── */
+  .input-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 20px;
+  }
+  .input-row input, .input-row select {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 9px 14px;
+    border-radius: 5px;
+    font-family: 'Space Mono', monospace;
+    font-size: 13px;
+    outline: none;
+    transition: border .2s;
+    flex: 1;
+  }
+  .input-row input:focus, .input-row select:focus { border-color: var(--seq); }
+  .btn {
+    background: var(--seq);
+    color: #fff;
+    border: none;
+    padding: 9px 20px;
+    border-radius: 5px;
+    font-family: 'Syne', sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    letter-spacing: .5px;
+    text-transform: uppercase;
+    transition: opacity .2s;
+    white-space: nowrap;
+  }
+  .btn:hover { opacity: .85; }
+  .btn.sm { padding: 6px 14px; font-size: 10px; }
+
+  /* ── SPEEDUP BAR ── */
+  .speedup-bar-wrap { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .speedup-label { width: 110px; font-size: 11px; color: var(--text); text-align: right; }
+  .speedup-bar-outer { flex: 1; background: var(--surface2); border-radius: 3px; height: 18px; position: relative; }
+  .speedup-bar-inner { height: 100%; border-radius: 3px; display: flex; align-items: center; padding-left: 8px; transition: width 1s cubic-bezier(.16,1,.3,1); }
+  .speedup-val { font-size: 10px; font-weight: 700; color: #fff; }
+
+  /* ── STEP SLIDER ── */
+  .step-control {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 20px;
+    background: var(--surface2);
+    padding: 12px 16px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+  }
+  .step-control label { font-size: 11px; color: var(--muted); white-space: nowrap; }
+  .step-control input[type=range] {
+    flex: 1;
+    accent-color: var(--seq);
+    cursor: pointer;
+  }
+  .step-val {
+    font-family: 'Syne', sans-serif;
+    font-size: 16px;
+    font-weight: 800;
+    color: var(--seq);
+    min-width: 40px;
+    text-align: right;
+  }
+
+  /* ── VARIANT TAG ── */
+  .var-tag {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .6px;
+  }
+  .var-tag.seq   { background: #4c8ef520; color: var(--seq); }
+  .var-tag.omp   { background: #f5a62320; color: var(--omp); }
+  .var-tag.mpi   { background: #4caf7d20; color: var(--mpi); }
+  .var-tag.cuda  { background: #e0525220; color: var(--cuda); }
+
+  /* ── SCROLLBAR ── */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  /* ── STEP FEED ── */
+  .step-feed {
+    max-height: 240px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface2);
+  }
+  .step-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 14px;
+    border-bottom: 1px solid #151c2a;
+    transition: background .15s;
+    cursor: pointer;
+  }
+  .step-item:hover { background: #1a2035; }
+  .step-item.highlighted { background: #1e2a40; }
+  .step-num { color: var(--muted); font-size: 10px; min-width: 36px; }
+  .step-pair { flex: 1; }
+  .step-freq { color: var(--muted); font-size: 11px; text-align: right; min-width: 60px; }
+  .freq-bar {
+    height: 3px;
+    border-radius: 2px;
+    margin-top: 3px;
+    background: var(--seq);
+    opacity: .6;
+  }
+
+  /* ── NO DATA ── */
+  .no-data {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 40px;
+    color: var(--muted);
+    text-align: center;
+    gap: 12px;
+  }
+  .no-data .icon { font-size: 48px; opacity: .4; }
+  .no-data p { font-size: 12px; line-height: 1.7; max-width: 380px; }
+
+  /* ── HEATMAP ── */
+  #heatmapCanvas { border-radius: 4px; }
+
+  /* ── COMPLEXITY TABLE ── */
+  .complexity-table { width: 100%; border-collapse: collapse; }
+  .complexity-table th, .complexity-table td {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    text-align: left;
+  }
+  .complexity-table th { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .8px; }
+  .complexity-table td:first-child { font-weight: 700; }
+  code {
+    font-family: 'Space Mono', monospace;
+    background: var(--surface2);
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+    color: var(--omp);
+  }
+
+  /* ── PULSE ANIM ── */
+  @keyframes pulse-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: none; }
+  }
+  .anim-in { animation: pulse-in .3s ease forwards; }
+
+  /* ── LEGEND ── */
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+
+  /* ── COLLAPSIBLE ── */
+  details summary { cursor: pointer; padding: 10px 0; color: var(--muted); font-size: 11px; user-select: none; }
+  details summary:hover { color: var(--text); }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>BPE <span>Parallel</span> Engine</h1>
+    <div class="header-sub">
+      Penn Treebank · From-scratch C/C++ Tokenizer<br>
+      <div class="badge-row">
+        <span class="badge seq">Sequential</span>
+        <span class="badge omp">OpenMP</span>
+        <span class="badge mpi">MPI</span>
+        <span class="badge cuda">CUDA</span>
+        <span class="badge hybrid">MPI+CUDA</span>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="tabs">
+  <div class="tab active" onclick="switchTab('overview')">Overview</div>
+  <div class="tab" onclick="switchTab('merges')">Merge Steps</div>
+  <div class="tab" onclick="switchTab('tokenizer')">Tokenizer</div>
+  <div class="tab" onclick="switchTab('performance')">Performance</div>
+  <div class="tab" onclick="switchTab('analysis')">Analysis</div>
+  <div class="tab" onclick="switchTab('notes')">Design Notes</div>
+</div>
+
+<!-- ═══════════════ OVERVIEW ═══════════════ -->
+<div class="content">
+<div id="panel-overview" class="panel active">
+
+  <div class="section-title">Load CSV Results</div>
+  <div class="card" style="margin-bottom:20px">
+    <div class="card-header">Upload Exported CSV Files from Colab</div>
+    <div class="upload-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+      <div class="upload-icon">📂</div>
+      <div class="upload-label">Drop CSV files here or click to browse</div>
+      <div class="upload-hint">seq_results.csv · omp_*.csv · mpi_*.csv · cuda_results.csv · hybrid_*.csv</div>
+    </div>
+    <input type="file" id="fileInput" multiple accept=".csv">
+    <div id="loaded-files" style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;"></div>
+  </div>
+
+  <div class="section-title">Summary Stats</div>
+  <div id="stat-tiles" class="grid-4" style="margin-bottom:20px">
+    <div class="stat-tile seq">
+      <div class="stat-label">Total Merges</div>
+      <div class="stat-value" id="stat-merges">—</div>
+      <div class="stat-sub">across all variants</div>
+    </div>
+    <div class="stat-tile omp">
+      <div class="stat-label">Variants Loaded</div>
+      <div class="stat-value" id="stat-variants">0</div>
+      <div class="stat-sub">CSV files</div>
+    </div>
+    <div class="stat-tile mpi">
+      <div class="stat-label">Max Speedup</div>
+      <div class="stat-value" id="stat-speedup">—</div>
+      <div class="stat-sub">vs sequential</div>
+    </div>
+    <div class="stat-tile cuda">
+      <div class="stat-label">Fastest Variant</div>
+      <div class="stat-value" id="stat-fastest" style="font-size:14px;margin-top:8px">—</div>
+      <div class="stat-sub">by total time</div>
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <div>
+      <div class="section-title">Cumulative Time Comparison</div>
+      <div class="chart-wrap" style="height:280px">
+        <canvas id="cumChart" height="280"></canvas>
+      </div>
+    </div>
+    <div>
+      <div class="section-title">Speedup vs Sequential</div>
+      <div id="speedup-bars" class="card" style="padding:16px 20px;">
+        <div class="no-data"><div class="icon">⏳</div><p>Load CSV files to see speedup comparison</p></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══════════════ MERGE STEPS ═══════════════ -->
+<div id="panel-merges" class="panel">
+  <div class="section-title">BPE Merge Explorer</div>
+
+  <div class="input-row">
+    <select id="variantSelect">
+      <option value="">— Select variant —</option>
+    </select>
+    <input type="text" id="searchPair" placeholder="Search pair (e.g. 'th', 'e r')" style="flex:.5">
+    <button class="btn" onclick="applySearch()">Search</button>
+  </div>
+
+  <div class="step-control">
+    <label>Step range:</label>
+    <input type="range" id="stepRange" min="1" max="500" value="50" oninput="updateStepView(this.value)">
+    <div class="step-val" id="stepVal">50</div>
+    <label>/ <span id="stepMax">—</span></label>
+  </div>
+
+  <div class="grid-2" style="gap:20px">
+    <div>
+      <div class="card-header" style="margin-bottom:8px">Merge Sequence (first <span id="showN">50</span> steps)</div>
+      <div class="step-feed" id="stepFeed">
+        <div class="no-data"><div class="icon">📋</div><p>Load and select a variant to browse merges</p></div>
+      </div>
+    </div>
+    <div>
+      <div class="card-header" style="margin-bottom:8px">Per-Step Wall Time</div>
+      <div class="chart-wrap" style="height:240px">
+        <canvas id="stepChart" height="240"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div style="margin-top:20px">
+    <div class="section-title">Merge Frequency Decay</div>
+    <div class="chart-wrap" style="height:220px">
+      <canvas id="freqChart" height="220"></canvas>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ TOKENIZER ═══════════════ -->
+<div id="panel-tokenizer" class="panel">
+  <div class="section-title">Live BPE Tokenizer</div>
+
+  <div class="card" style="margin-bottom:18px">
+    <div class="card-header">Configuration</div>
+    <div class="input-row">
+      <select id="tokVariant">
+        <option value="">— Select variant for merge rules —</option>
+      </select>
+      <label style="white-space:nowrap;font-size:11px;color:var(--muted)">Merges to apply:</label>
+      <input type="number" id="nMerges" value="200" min="1" max="2000" style="flex:0;width:90px">
+    </div>
+  </div>
+
+  <div class="input-row">
+    <input type="text" id="tokInput" placeholder="Type a word or sentence…" value="playing tokenization unconstitutional corporation">
+    <button class="btn" onclick="runTokenizer()">Tokenize ▶</button>
+  </div>
+
+  <div id="tokOutput" class="card">
+    <div class="no-data"><div class="icon">🔤</div><p>Enter text and click Tokenize</p></div>
+  </div>
+
+  <div style="margin-top:16px">
+    <div class="section-title">Step-by-Step Animation</div>
+    <div class="step-control">
+      <label>Merge step:</label>
+      <input type="range" id="animStep" min="0" max="200" value="0" oninput="animateTokenizer(this.value)">
+      <div class="step-val" id="animStepVal">0</div>
+      <button class="btn sm" id="playBtn" onclick="playAnimation()">▶ Play</button>
+    </div>
+    <div id="animOutput" class="card" style="min-height:80px">
+      <div class="no-data" style="padding:20px"><p>Adjust slider to see step-by-step tokenization</p></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ PERFORMANCE ═══════════════ -->
+<div id="panel-performance" class="panel">
+  <div class="section-title">Performance Benchmarks</div>
+
+  <div class="grid-2" style="margin-bottom:20px">
+    <div>
+      <div class="card-header" style="margin-bottom:8px">OpenMP Thread Scaling</div>
+      <div class="chart-wrap" style="height:260px">
+        <canvas id="ompScaleChart" height="260"></canvas>
+      </div>
+    </div>
+    <div>
+      <div class="card-header" style="margin-bottom:8px">MPI Process Scaling</div>
+      <div class="chart-wrap" style="height:260px">
+        <canvas id="mpiScaleChart" height="260"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-title">Per-Step Time Distribution (Box)</div>
+  <div class="chart-wrap" style="height:220px">
+    <canvas id="boxChart" height="220"></canvas>
+  </div>
+
+  <div style="margin-top:20px">
+    <div class="section-title">Summary Table</div>
+    <div class="card" style="padding:0;overflow:hidden">
+      <table class="data-table" id="summaryTable">
+        <thead><tr>
+          <th>Variant</th><th>Steps</th><th>Total (s)</th>
+          <th>Mean ms/step</th><th>P50 ms</th><th>P95 ms</th><th>Speedup</th>
+        </tr></thead>
+        <tbody id="summaryBody">
+          <tr><td colspan="7" style="text-align:center;padding:30px;color:var(--muted)">Load CSV files to populate table</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ ANALYSIS ═══════════════ -->
+<div id="panel-analysis" class="panel">
+  <div class="section-title">Vocabulary & Token Length</div>
+  <div class="grid-2" style="margin-bottom:20px">
+    <div>
+      <div class="card-header" style="margin-bottom:8px">Vocabulary Size Growth</div>
+      <div class="chart-wrap" style="height:240px">
+        <canvas id="vocabChart" height="240"></canvas>
+      </div>
+    </div>
+    <div>
+      <div class="card-header" style="margin-bottom:8px">Average Token Length</div>
+      <div class="chart-wrap" style="height:240px">
+        <canvas id="toklenChart" height="240"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-title">Merge Length Heatmap</div>
+  <div class="card">
+    <div class="card-header">Mean pair frequency by (step bin × merged token length)</div>
+    <canvas id="heatmapCanvas" style="width:100%;max-height:200px;display:block"></canvas>
+    <div id="heatmapLegend" style="display:flex;align-items:center;gap:12px;margin-top:10px;font-size:11px;color:var(--muted)">
+      <span>Low freq</span>
+      <canvas id="legendGrad" width="140" height="12" style="border-radius:3px"></canvas>
+      <span>High freq</span>
+    </div>
+  </div>
+
+  <div style="margin-top:20px">
+    <div class="section-title">Top 30 Merges by Frequency</div>
+    <div class="card" style="padding:0;overflow:hidden;max-height:340px;overflow-y:auto">
+      <table class="data-table" id="topMergesTable">
+        <thead><tr><th>#</th><th>Step</th><th>Pair A</th><th>Pair B</th><th>Merged</th><th>Frequency</th></tr></thead>
+        <tbody id="topMergesBody">
+          <tr><td colspan="6" style="text-align:center;padding:30px;color:var(--muted)">Load sequential CSV to view top merges</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ NOTES ═══════════════ -->
+<div id="panel-notes" class="panel">
+  <div class="section-title">Algorithm Design & Complexity</div>
+
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-header">BPE Algorithm (Sennrich et al., 2016)</div>
+    <p style="color:var(--muted);font-size:12px;line-height:1.8">
+      Byte Pair Encoding tokenizes text by iteratively merging the most frequent adjacent symbol pair.
+      Starting from individual characters, each merge step creates a new subword unit.
+      After <em>N</em> merges, words are represented as sequences of learned subword tokens.
+    </p>
+    <div style="background:var(--surface2);border-radius:5px;padding:14px;margin-top:14px;font-size:12px;line-height:2">
+      <code>low → l o w &lt;/w&gt;</code><br>
+      <code>lower → l o w e r &lt;/w&gt;</code><br>
+      After merging <code>l</code>+<code>o</code>:<br>
+      <code>lo w &lt;/w&gt; , lo w e r &lt;/w&gt;</code>
+    </div>
+  </div>
+
+  <div class="section-title">Complexity Analysis</div>
+  <div class="card" style="padding:0;overflow:hidden;margin-bottom:16px">
+    <table class="complexity-table">
+      <thead><tr><th>Variant</th><th>Pair Count</th><th>Merge Apply</th><th>Key Notes</th></tr></thead>
+      <tbody>
+        <tr><td><span class="var-tag seq">Sequential</span></td><td><code>O(V·L)</code></td><td><code>O(V·L)</code></td><td>V = vocab size, L = avg token len</td></tr>
+        <tr><td><span class="var-tag omp">OpenMP</span></td><td><code>O(V·L / T)</code></td><td><code>O(V·L / T)</code></td><td>T threads; merge-table reduction O(T·H)</td></tr>
+        <tr><td><span class="var-tag mpi">MPI</span></td><td><code>O(V·L / P)</code></td><td><code>O(V·L)</code></td><td>P ranks; apply replicated on all ranks</td></tr>
+        <tr><td><span class="var-tag cuda">CUDA</span></td><td><code>O(V·L / G)</code></td><td><code>O(V·L)</code></td><td>G GPU threads; PCIe transfer per step</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="section-title">Bugs Fixed in Hybrid Version</div>
+  <div class="card" style="padding:0;overflow:hidden;margin-bottom:16px">
+    <table class="data-table">
+      <thead><tr><th>#</th><th>File</th><th>Bug</th><th>Fix</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td><code>bpe_mpi_cuda.cu</code></td>
+          <td>MPI_MAXLOC picks rank with highest local count → wrong merge</td>
+          <td>MPI_Gatherv compact pair lists → rank 0 sums counts → broadcast true winner</td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td><code>bpe_mpi_cuda.cu</code></td>
+          <td>Full word-array re-uploaded to GPU per step (~14 MB × 500 = 7 GB PCIe)</td>
+          <td>apply_merge_kernel applies merge in-place; only ~68 bytes cross PCIe per step</td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td><code>bpe_cuda.cu</code>, <code>bpe_mpi_cuda.cu</code></td>
+          <td>__syncthreads() inside divergent probe loop → UB / warp deadlock</td>
+          <td>Removed; atomicCAS/atomicExch provide necessary ordering</td>
+        </tr>
+        <tr>
+          <td>4</td>
+          <td><code>bpe_mpi_cuda.cu</code></td>
+          <td>Full 512K-slot pair tables sent over MPI (~36 MB/step/rank)</td>
+          <td>Only non-empty slots packed into CPair list sent via MPI_Gatherv</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="section-title">Bottlenecks & Future Improvements</div>
+  <div class="grid-2" style="gap:14px">
+    <div class="card">
+      <div class="card-header">Current Bottlenecks</div>
+      <ul style="color:var(--muted);font-size:12px;line-height:2.2;padding-left:16px">
+        <li><strong style="color:var(--text)">OpenMP:</strong> Hash-table merge phase is serial → limits scaling beyond ~8 threads</li>
+        <li><strong style="color:var(--text)">MPI:</strong> Full-vocab apply after broadcast replicated on all ranks</li>
+        <li><strong style="color:var(--text)">CUDA:</strong> PCIe round-trip per step dominates for small vocabularies</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="card-header">Proposed Improvements</div>
+      <ul style="color:var(--muted);font-size:12px;line-height:2.2;padding-left:16px">
+        <li>Use a <strong style="color:var(--text)">min-heap / priority queue</strong> for O(log N) best-pair lookup</li>
+        <li><strong style="color:var(--text)">Incremental update:</strong> only recount pairs involving the newly merged symbol</li>
+        <li><strong style="color:var(--text)">GPU:</strong> keep vocabulary fully on device; only copy merge rule strings</li>
+        <li><strong style="color:var(--text)">MPI + OpenMP hybrid:</strong> each MPI rank uses multiple OMP threads</li>
+      </ul>
+    </div>
+  </div>
+
+  <div style="margin-top:16px">
+    <div class="section-title">Export Colab Snippet</div>
+    <div class="card">
+      <div class="card-header">Add to your notebook to auto-export CSVs for this visualizer</div>
+      <pre style="background:var(--surface2);padding:14px;border-radius:5px;overflow-x:auto;font-size:11px;color:#82c89a;line-height:1.8"># ── Export results for BPE Visualizer ──
+from google.colab import files
+import os
+
+csv_files = ['seq_results.csv', 'omp_1t.csv', 'omp_2t.csv',
+             f'omp_{NCORES}t.csv', 'mpi_1p.csv', 'mpi_2p.csv',
+             'mpi_4p.csv', 'cuda_results.csv',
+             'hybrid_1p.csv', 'hybrid_2p.csv', 'bpe_summary.csv']
+
+print("Downloading available CSV files...")
+for f in csv_files:
+    if os.path.exists(f):
+        files.download(f)
+        print(f"  ✅ {f}")
+    else:
+        print(f"  ⏭  {f} not found")
+print("Done! Drop these into the BPE Visualizer.")</pre>
+    </div>
+  </div>
+</div>
+
+</div><!-- /content -->
+
+<script>
+// ═══════════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════════
+const state = {
+  variants: {},     // label -> [{step,pair_a,pair_b,freq,wall_ms,...}]
+  charts: {},
+  animTimer: null,
+  animPlaying: false,
+};
+
+const VAR_COLORS = {
+  'Sequential':'#4c8ef5','OMP-1t':'#7aa8f0','OMP-2t':'#f5a623',
+  'OMP-4t':'#f0b84c','OMP-8t':'#e0522a','OMP-16t':'#ff6b4a',
+  'MPI-1p':'#4caf7d','MPI-2p':'#6ac98f','MPI-4p':'#2e7d4f',
+  'CUDA':'#8172b2','Hybrid-1p':'#b06ef5','Hybrid-2p':'#c98cff',
+};
+function varColor(label) {
+  if (VAR_COLORS[label]) return VAR_COLORS[label];
+  for (const k of Object.keys(VAR_COLORS)) {
+    if (label.toLowerCase().includes(k.toLowerCase().split('-')[0])) return VAR_COLORS[k];
+  }
+  return '#5a6585';
+}
+
+// ═══════════════════════════════════════════════════
+//  TABS
+// ═══════════════════════════════════════════════════
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelector(`.tab[onclick="switchTab('${name}')"]`).classList.add('active');
+  document.getElementById(`panel-${name}`).classList.add('active');
+  if (name === 'performance') renderPerformanceCharts();
+  if (name === 'analysis')    renderAnalysisCharts();
+}
+
+// ═══════════════════════════════════════════════════
+//  CSV LOADING
+// ═══════════════════════════════════════════════════
+function parseCSV(text) {
+  const lines = text.trim().split('\n');
+  if (lines.length < 2) return [];
+  const header = lines[0].split(',').map(h => h.trim().replace(/"/g,''));
+  return lines.slice(1).map(line => {
+    // handle quoted fields
+    const parts = []; let cur = ''; let inQ = false;
+    for (const ch of line) {
+      if (ch === '"') { inQ = !inQ; }
+      else if (ch === ',' && !inQ) { parts.push(cur); cur = ''; }
+      else cur += ch;
+    }
+    parts.push(cur);
+    const obj = {};
+    header.forEach((h, i) => {
+      const v = (parts[i] || '').trim();
+      obj[h] = isNaN(v) || v === '' ? v : Number(v);
+    });
+    return obj;
+  });
+}
+
+function inferLabel(filename) {
+  const f = filename.toLowerCase().replace('.csv','');
+  if (f.includes('seq')) return 'Sequential';
+  if (f.includes('hybrid')) {
+    const m = f.match(/(\d+)p/); return m ? `Hybrid-${m[1]}p` : 'Hybrid';
+  }
+  if (f.includes('cuda')) return 'CUDA';
+  if (f.match(/omp.*?(\d+)t/)) return `OMP-${f.match(/(\d+)t/)[1]}t`;
+  if (f.match(/mpi.*?(\d+)p/)) return `MPI-${f.match(/(\d+)p/)[1]}p`;
+  return filename.replace('.csv','');
+}
+
+function loadCSV(file) {
+  return new Promise(resolve => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const data = parseCSV(e.target.result);
+      const label = inferLabel(file.name);
+      state.variants[label] = data;
+      resolve(label);
+    };
+    reader.readAsText(file);
+  });
+}
+
+document.getElementById('fileInput').addEventListener('change', async e => {
+  const files = Array.from(e.target.files);
+  const promises = files.map(loadCSV);
+  const labels = await Promise.all(promises);
+  labels.forEach(addFileBadge);
+  refreshAll();
+});
+
+// Drag-and-drop
+const dz = document.getElementById('dropZone');
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('drag'));
+dz.addEventListener('drop', async e => {
+  e.preventDefault(); dz.classList.remove('drag');
+  const files = Array.from(e.dataTransfer.files).filter(f => f.name.endsWith('.csv'));
+  const labels = await Promise.all(files.map(loadCSV));
+  labels.forEach(addFileBadge);
+  refreshAll();
+});
+
+function addFileBadge(label) {
+  const container = document.getElementById('loaded-files');
+  const cls = label.toLowerCase().includes('seq') ? 'seq'
+    : label.toLowerCase().includes('omp') ? 'omp'
+    : label.toLowerCase().includes('mpi') ? 'mpi'
+    : label.toLowerCase().includes('cuda') ? 'cuda' : 'hybrid';
+  const b = document.createElement('span');
+  b.className = `badge ${cls}`;
+  b.textContent = label;
+  container.appendChild(b);
+}
+
+// ═══════════════════════════════════════════════════
+//  REFRESH ALL PANELS
+// ═══════════════════════════════════════════════════
+function refreshAll() {
+  updateStats();
+  updateVariantSelects();
+  renderOverviewCharts();
+  renderSpeedupBars();
+  updateMergePanel();
+  renderTopMerges();
+  // defer heavy panels until switched
+}
+
+// ═══════════════════════════════════════════════════
+//  STATS
+// ═══════════════════════════════════════════════════
+function updateStats() {
+  const keys = Object.keys(state.variants);
+  document.getElementById('stat-variants').textContent = keys.length;
+
+  let maxMerges = 0;
+  keys.forEach(k => maxMerges = Math.max(maxMerges, state.variants[k].length));
+  document.getElementById('stat-merges').textContent = maxMerges > 0 ? maxMerges.toLocaleString() : '—';
+
+  const seqData = state.variants['Sequential'];
+  if (seqData) {
+    const seqTotal = seqData.reduce((s,r) => s + (r.wall_ms||0), 0);
+    let bestSpeedup = 1, fastest = 'Sequential';
+    keys.forEach(k => {
+      const total = state.variants[k].reduce((s,r) => s + (r.wall_ms||0), 0);
+      const sp = seqTotal / total;
+      if (sp > bestSpeedup) { bestSpeedup = sp; fastest = k; }
+    });
+    document.getElementById('stat-speedup').textContent = bestSpeedup.toFixed(2) + '×';
+    document.getElementById('stat-fastest').textContent = fastest;
+  }
+}
+
+// ═══════════════════════════════════════════════════
+//  VARIANT SELECTS
+// ═══════════════════════════════════════════════════
+function updateVariantSelects() {
+  const keys = Object.keys(state.variants);
+  ['variantSelect','tokVariant'].forEach(id => {
+    const sel = document.getElementById(id);
+    const prev = sel.value;
+    sel.innerHTML = `<option value="">— Select variant —</option>`;
+    keys.forEach(k => {
+      const opt = document.createElement('option');
+      opt.value = k; opt.textContent = k;
+      sel.appendChild(opt);
+    });
+    if (keys.includes(prev)) sel.value = prev;
+    else if (keys.includes('Sequential')) sel.value = 'Sequential';
+    else if (keys.length) sel.value = keys[0];
+  });
+}
+
+// ═══════════════════════════════════════════════════
+//  MINI CHART ENGINE (no dependencies)
+// ═══════════════════════════════════════════════════
+function resolveDPR(canvas) {
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width  = rect.width  * dpr;
+  canvas.height = rect.height * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  return { ctx, w: rect.width, h: rect.height };
+}
+
+function drawGrid(ctx, w, h, pad, yMin, yMax, steps=5) {
+  ctx.strokeStyle = '#1e2535';
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= steps; i++) {
+    const y = pad.top + (h - pad.top - pad.bottom) * i / steps;
+    ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(w - pad.right, y); ctx.stroke();
+  }
+  ctx.fillStyle = '#5a6585';
+  ctx.font = '10px Space Mono, monospace';
+  ctx.textAlign = 'right';
+  for (let i = 0; i <= steps; i++) {
+    const v = yMax - (yMax - yMin) * i / steps;
+    const y = pad.top + (h - pad.top - pad.bottom) * i / steps;
+    ctx.fillText(fmtN(v), pad.left - 4, y + 3);
+  }
+}
+
+function fmtN(v) {
+  if (v >= 1e6) return (v/1e6).toFixed(1)+'M';
+  if (v >= 1e3) return (v/1e3).toFixed(1)+'k';
+  if (v >= 100) return Math.round(v);
+  return v.toFixed(2);
+}
+
+function drawLineChart(canvasId, datasets, options={}) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  const { ctx, w, h } = resolveDPR(canvas);
+  const pad = { top:20, right:20, bottom:36, left:52 };
+
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = '#161b27';
+  ctx.fillRect(0, 0, w, h);
+
+  if (!datasets.length) return;
+
+  const allX = datasets.flatMap(d => d.data.map(p => p.x));
+  const allY = datasets.flatMap(d => d.data.map(p => p.y));
+  const xMin = Math.min(...allX), xMax = Math.max(...allX);
+  const yMin = options.yMin !== undefined ? options.yMin : Math.min(...allY) * .9;
+  const yMax = Math.max(...allY) * 1.05;
+  const cw = w - pad.left - pad.right;
+  const ch = h - pad.top - pad.bottom;
+
+  function toX(x) { return pad.left + (x - xMin) / (xMax - xMin || 1) * cw; }
+  function toY(y) { return pad.top + (1 - (y - yMin) / (yMax - yMin || 1)) * ch; }
+
+  drawGrid(ctx, w, h, pad, yMin, yMax);
+
+  // X axis labels
+  ctx.fillStyle = '#5a6585';
+  ctx.font = '10px Space Mono, monospace';
+  ctx.textAlign = 'center';
+  const xLabels = 6;
+  for (let i = 0; i <= xLabels; i++) {
+    const v = xMin + (xMax - xMin) * i / xLabels;
+    ctx.fillText(Math.round(v), toX(v), h - pad.bottom + 14);
+  }
+
+  // axis label
+  if (options.xLabel) {
+    ctx.fillStyle = '#3a445a';
+    ctx.fillText(options.xLabel, pad.left + cw/2, h - 2);
+  }
+
+  datasets.forEach(d => {
+    if (!d.data.length) return;
+    ctx.beginPath();
+    ctx.strokeStyle = d.color;
+    ctx.lineWidth = d.lineWidth || 1.8;
+    ctx.globalAlpha = d.alpha || 1;
+    if (options.yScale === 'log') {
+      // log not implemented; fallback linear
+    }
+    d.data.forEach((p, i) => {
+      const x = toX(p.x), y = toY(p.y);
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    if (d.fill) {
+      ctx.lineTo(toX(d.data[d.data.length-1].x), pad.top + ch);
+      ctx.lineTo(toX(d.data[0].x), pad.top + ch);
+      ctx.closePath();
+      ctx.globalAlpha = .1;
+      ctx.fillStyle = d.color;
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  });
+
+  // Legend
+  if (options.legend) {
+    let lx = pad.left + 6, ly = pad.top + 8;
+    datasets.forEach(d => {
+      ctx.fillStyle = d.color;
+      ctx.fillRect(lx, ly - 6, 16, 3);
+      ctx.fillStyle = '#d4daf0';
+      ctx.font = '10px Space Mono';
+      ctx.textAlign = 'left';
+      ctx.fillText(d.label, lx + 20, ly);
+      lx += ctx.measureText(d.label).width + 42;
+      if (lx > w - 80) { lx = pad.left + 6; ly += 16; }
+    });
+  }
+}
+
+function drawBarChart(canvasId, labels, values, colors) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  const { ctx, w, h } = resolveDPR(canvas);
+  const pad = { top:16, right:16, bottom:50, left:52 };
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = '#161b27'; ctx.fillRect(0, 0, w, h);
+
+  const yMax = Math.max(...values) * 1.2;
+  drawGrid(ctx, w, h, pad, 0, yMax);
+
+  const cw = w - pad.left - pad.right;
+  const ch = h - pad.top - pad.bottom;
+  const barW = Math.min(60, cw / labels.length * .7);
+  const gap   = cw / labels.length;
+
+  labels.forEach((label, i) => {
+    const bh = (values[i] / yMax) * ch;
+    const bx = pad.left + gap * i + gap/2 - barW/2;
+    const by = pad.top + ch - bh;
+
+    ctx.fillStyle = colors[i] || '#4c8ef5';
+    ctx.globalAlpha = .85;
+    ctx.beginPath();
+    ctx.roundRect(bx, by, barW, bh, [3,3,0,0]);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 10px Space Mono';
+    ctx.textAlign = 'center';
+    ctx.fillText(values[i].toFixed(2)+'×', bx + barW/2, by - 5);
+
+    ctx.fillStyle = '#5a6585';
+    ctx.font = '10px Space Mono';
+    ctx.fillText(label, bx + barW/2, h - pad.bottom + 16);
+    if (label.length > 6) ctx.fillText('', bx + barW/2, h - pad.bottom + 28);
+  });
+}
+
+// ═══════════════════════════════════════════════════
+//  OVERVIEW CHARTS
+// ═══════════════════════════════════════════════════
+function renderOverviewCharts() {
+  const keys = Object.keys(state.variants);
+  if (!keys.length) return;
+
+  const datasets = keys.map(k => {
+    const rows = state.variants[k];
+    let cum = 0;
+    return {
+      label: k,
+      color: varColor(k),
+      data: rows.map(r => { cum += (r.wall_ms||0); return { x: r.step, y: cum/1000 }; }),
+      lineWidth: 2,
+    };
+  });
+  drawLineChart('cumChart', datasets, { yMin:0, xLabel:'step', legend:true });
+}
+
+function renderSpeedupBars() {
+  const keys = Object.keys(state.variants);
+  const container = document.getElementById('speedup-bars');
+  const seqData = state.variants['Sequential'];
+  if (!seqData || !keys.length) return;
+
+  const seqTotal = seqData.reduce((s,r) => s+(r.wall_ms||0), 0);
+
+  let html = '';
+  const sorted = [...keys].sort((a,b) => {
+    const tA = state.variants[a].reduce((s,r)=>s+(r.wall_ms||0),0);
+    const tB = state.variants[b].reduce((s,r)=>s+(r.wall_ms||0),0);
+    return tB - tA; // slowest first (seq=1x at bottom)
+  });
+  const maxSp = Math.max(...sorted.map(k => seqTotal / state.variants[k].reduce((s,r)=>s+(r.wall_ms||0),0)));
+
+  sorted.forEach(k => {
+    const total = state.variants[k].reduce((s,r)=>s+(r.wall_ms||0),0);
+    const sp = seqTotal / total;
+    const pct = (sp / (maxSp * 1.1)) * 100;
+    const cls = k.includes('seq') ? 'seq' : k.includes('OMP') ? 'omp' : k.includes('MPI') && !k.includes('Hybrid') ? 'mpi' : k.includes('CUDA') ? 'cuda' : 'hybrid';
+    html += `<div class="speedup-bar-wrap">
+      <div class="speedup-label">${k}</div>
+      <div class="speedup-bar-outer">
+        <div class="speedup-bar-inner" style="width:${pct}%;background:${varColor(k)}">
+          <span class="speedup-val">${sp.toFixed(2)}×</span>
+        </div>
+      </div>
+    </div>`;
+  });
+  container.innerHTML = html || `<div class="no-data"><div class="icon">⚡</div><p>Load variants to compare speedups</p></div>`;
+}
+
+// ═══════════════════════════════════════════════════
+//  MERGE STEPS PANEL
+// ═══════════════════════════════════════════════════
+function updateMergePanel() {
+  const keys = Object.keys(state.variants);
+  if (!keys.length) return;
+  const sel = document.getElementById('variantSelect');
+  if (!sel.value && keys.length) sel.value = keys.includes('Sequential') ? 'Sequential' : keys[0];
+
+  renderMergeSteps();
+}
+
+document.getElementById('variantSelect').addEventListener('change', renderMergeSteps);
+
+function updateStepView(val) {
+  document.getElementById('stepVal').textContent = val;
+  document.getElementById('showN').textContent = val;
+  renderMergeSteps();
+}
+
+function renderMergeSteps() {
+  const label = document.getElementById('variantSelect').value;
+  const n = parseInt(document.getElementById('stepRange').value);
+  if (!label || !state.variants[label]) {
+    document.getElementById('stepFeed').innerHTML = `<div class="no-data"><div class="icon">📋</div><p>Select a variant</p></div>`;
+    return;
+  }
+
+  const rows = state.variants[label].slice(0, n);
+  document.getElementById('stepMax').textContent = state.variants[label].length;
+  document.getElementById('stepRange').max = state.variants[label].length;
+
+  const maxFreq = Math.max(...rows.map(r => r.freq||0));
+  let html = rows.map(r => {
+    const merged = (r.pair_a||'') + (r.pair_b||'');
+    const barW = ((r.freq||0)/maxFreq*60).toFixed(1);
+    return `<div class="step-item">
+      <span class="step-num">${r.step}</span>
+      <span class="step-pair">
+        <span class="merge-cell">${r.pair_a}</span>
+        <span class="merge-arrow">+</span>
+        <span class="merge-cell">${r.pair_b}</span>
+        <span class="merge-arrow">→</span>
+        <span class="merge-cell" style="color:#4c8ef5">${merged}</span>
+        <div class="freq-bar" style="width:${barW}px"></div>
+      </span>
+      <span class="step-freq">${(r.freq||0).toLocaleString()}</span>
+    </div>`;
+  }).join('');
+  document.getElementById('stepFeed').innerHTML = html || `<div class="no-data"><p>No data</p></div>`;
+
+  // step-time chart
+  const data = rows.map(r => ({ x: r.step, y: r.wall_ms||0 }));
+  drawLineChart('stepChart', [{label, color: varColor(label), data, fill:true}], {yMin:0, xLabel:'step'});
+
+  // freq chart
+  renderFreqChart();
+}
+
+function renderFreqChart() {
+  const keys = Object.keys(state.variants);
+  const n = parseInt(document.getElementById('stepRange').value);
+  const datasets = keys.map(k => ({
+    label: k,
+    color: varColor(k),
+    data: state.variants[k].slice(0, n).map(r => ({ x: r.step, y: r.freq||0 })),
+    alpha: .75,
+  }));
+  drawLineChart('freqChart', datasets, {yMin:0, xLabel:'step', legend:true});
+}
+
+function applySearch() {
+  const q = document.getElementById('searchPair').value.trim().toLowerCase();
+  const label = document.getElementById('variantSelect').value;
+  if (!label || !q) return;
+  const rows = state.variants[label].filter(r =>
+    (r.pair_a+''+r.pair_b).toLowerCase().includes(q) ||
+    (r.pair_a+''+r.pair_b).toLowerCase().replace('|','').includes(q)
+  ).slice(0, 100);
+  const maxFreq = Math.max(...rows.map(r => r.freq||0));
+  let html = rows.map(r => {
+    const merged = (r.pair_a||'') + (r.pair_b||'');
+    const barW = ((r.freq||0)/maxFreq*60).toFixed(1);
+    return `<div class="step-item highlighted">
+      <span class="step-num">${r.step}</span>
+      <span class="step-pair">
+        <span class="merge-cell">${r.pair_a}</span>
+        <span class="merge-arrow">+</span>
+        <span class="merge-cell">${r.pair_b}</span>
+        <span class="merge-arrow">→</span>
+        <span class="merge-cell" style="color:#4c8ef5">${merged}</span>
+        <div class="freq-bar" style="width:${barW}px;background:var(--omp)"></div>
+      </span>
+      <span class="step-freq">${(r.freq||0).toLocaleString()}</span>
+    </div>`;
+  }).join('');
+  document.getElementById('stepFeed').innerHTML = html || `<div class="no-data"><p>No matches for "${q}"</p></div>`;
+}
+
+// ═══════════════════════════════════════════════════
+//  TOKENIZER
+// ═══════════════════════════════════════════════════
+function buildMerges(data, n) {
+  return data.slice(0, n).map(r => [String(r.pair_a), String(r.pair_b)]);
+}
+
+function bpeEncode(word, merges) {
+  let tokens = [...word, '</w>'];
+  for (const [a, b] of merges) {
+    const nt = [];
+    let i = 0;
+    while (i < tokens.length) {
+      if (i < tokens.length - 1 && tokens[i] === a && tokens[i+1] === b) {
+        nt.push(a+b); i += 2;
+      } else { nt.push(tokens[i++]); }
+    }
+    tokens = nt;
+  }
+  return tokens;
+}
+
+const TOK_PALETTE = ['#4c8ef530','#f5a62330','#4caf7d30','#e0525230','#8172b230','#b06ef530'];
+const TOK_TEXT    = ['#4c8ef5','#f5a623','#4caf7d','#e05252','#8172b2','#b06ef5'];
+
+function renderTokens(words, merges, container) {
+  const colorMap = {};
+  let colorIdx = 0;
+  function getColor(tok) {
+    if (tok === '</w>') return null;
+    if (!colorMap[tok]) colorMap[tok] = colorIdx++ % TOK_PALETTE.length;
+    return colorIdx - 1 < 0 ? 0 : colorMap[tok];
+  }
+
+  let html = '';
+  words.forEach(word => {
+    if (!word.trim()) return;
+    const toks = bpeEncode(word, merges);
+    html += `<div style="margin-bottom:14px">
+      <div style="font-size:11px;color:var(--muted);margin-bottom:6px">${word}</div>
+      <div class="token-word">`;
+    toks.forEach(tok => {
+      if (tok === '</w>') {
+        html += `<span class="tok-endofword">⟨/w⟩</span>`;
+      } else {
+        const ci = colorIdx++ % TOK_PALETTE.length;
+        html += `<span class="tok" style="background:${TOK_PALETTE[ci]};color:${TOK_TEXT[ci]};border:1px solid ${TOK_TEXT[ci]}40">${tok}</span>`;
+      }
+    });
+    html += `<span style="font-size:10px;color:var(--muted);margin-left:8px">${toks.filter(t=>t!=='</w>').length} tokens</span>`;
+    html += `</div></div>`;
+  });
+  container.innerHTML = html || `<div class="no-data"><p>No output</p></div>`;
+  container.classList.add('anim-in');
+}
+
+function runTokenizer() {
+  const label = document.getElementById('tokVariant').value;
+  const n = parseInt(document.getElementById('nMerges').value) || 200;
+  const input = document.getElementById('tokInput').value.trim();
+  const out = document.getElementById('tokOutput');
+
+  if (!label || !state.variants[label]) {
+    out.innerHTML = `<div class="no-data"><div class="icon">⚠️</div><p>Select a variant first</p></div>`;
+    return;
+  }
+  const merges = buildMerges(state.variants[label], n);
+  const words = input.split(/\s+/).filter(Boolean);
+  renderTokens(words, merges, out);
+
+  // also set up slider
+  const slider = document.getElementById('animStep');
+  slider.max = Math.min(n, state.variants[label].length);
+  slider.value = 0;
+  animateTokenizer(0);
+}
+
+function animateTokenizer(step) {
+  document.getElementById('animStepVal').textContent = step;
+  const label = document.getElementById('tokVariant').value;
+  if (!label || !state.variants[label]) return;
+  const merges = buildMerges(state.variants[label], parseInt(step));
+  const input = document.getElementById('tokInput').value.trim();
+  const words = input.split(/\s+/).filter(Boolean).slice(0, 3); // limit for anim
+  renderTokens(words, merges, document.getElementById('animOutput'));
+}
+
+function playAnimation() {
+  if (state.animPlaying) {
+    clearInterval(state.animTimer);
+    state.animPlaying = false;
+    document.getElementById('playBtn').textContent = '▶ Play';
+    return;
+  }
+  state.animPlaying = true;
+  document.getElementById('playBtn').textContent = '⏹ Stop';
+  const slider = document.getElementById('animStep');
+  const max = parseInt(slider.max);
+  let cur = 0;
+  state.animTimer = setInterval(() => {
+    slider.value = cur;
+    animateTokenizer(cur);
+    cur++;
+    if (cur > max) {
+      clearInterval(state.animTimer);
+      state.animPlaying = false;
+      document.getElementById('playBtn').textContent = '▶ Play';
+    }
+  }, 80);
+}
+
+// ═══════════════════════════════════════════════════
+//  PERFORMANCE CHARTS
+// ═══════════════════════════════════════════════════
+function renderPerformanceCharts() {
+  const keys = Object.keys(state.variants);
+  if (!keys.length) return;
+
+  // OMP scaling
+  const ompKeys = keys.filter(k => k.startsWith('OMP'));
+  if (ompKeys.length > 1) {
+    ompKeys.sort((a,b) => parseInt(a.match(/\d+/)) - parseInt(b.match(/\d+/)));
+    const t1 = state.variants[ompKeys[0]].reduce((s,r)=>s+(r.wall_ms||0),0);
+    const threads = ompKeys.map(k => parseInt(k.match(/\d+/)));
+    const speedups = ompKeys.map(k => t1 / state.variants[k].reduce((s,r)=>s+(r.wall_ms||0),0));
+    const ideal = threads.map(t => t / threads[0]);
+    drawLineChart('ompScaleChart', [
+      {label:'Actual', color:'#f5a623', data: threads.map((t,i)=>({x:t,y:speedups[i]})), lineWidth:2.5},
+      {label:'Ideal',  color:'#3a4455', data: threads.map((t,i)=>({x:t,y:ideal[i]})),   lineWidth:1.5},
+    ], {yMin:0, xLabel:'threads', legend:true});
+  }
+
+  // MPI scaling
+  const mpiKeys = keys.filter(k => k.startsWith('MPI-'));
+  if (mpiKeys.length > 1) {
+    mpiKeys.sort((a,b) => parseInt(a.match(/\d+/)) - parseInt(b.match(/\d+/)));
+    const t1 = state.variants[mpiKeys[0]].reduce((s,r)=>s+(r.wall_ms||0),0);
+    const procs = mpiKeys.map(k => parseInt(k.match(/\d+/)));
+    const speedups = mpiKeys.map(k => t1 / state.variants[k].reduce((s,r)=>s+(r.wall_ms||0),0));
+    const ideal = procs.map(p => p / procs[0]);
+    drawLineChart('mpiScaleChart', [
+      {label:'Actual', color:'#4caf7d', data: procs.map((p,i)=>({x:p,y:speedups[i]})), lineWidth:2.5},
+      {label:'Ideal',  color:'#3a4455', data: procs.map((p,i)=>({x:p,y:ideal[i]})),   lineWidth:1.5},
+    ], {yMin:0, xLabel:'processes', legend:true});
+  }
+
+  // Box-style distribution: show p50 per variant as bar
+  const seqData = state.variants['Sequential'];
+  const seqTotal = seqData ? seqData.reduce((s,r)=>s+(r.wall_ms||0),0) : null;
+  const labels=[], values=[], colors=[];
+  keys.forEach(k => {
+    const d = state.variants[k];
+    const ms = d.map(r=>r.wall_ms||0).sort((a,b)=>a-b);
+    const p50 = ms[Math.floor(ms.length*.5)];
+    labels.push(k); values.push(p50); colors.push(varColor(k));
+  });
+  if (labels.length) drawBarChart('boxChart', labels, values, colors);
+
+  // Summary table
+  const tbody = document.getElementById('summaryBody');
+  let html = '';
+  const seqTotalMs = seqData ? seqData.reduce((s,r)=>s+(r.wall_ms||0),0) : null;
+  keys.forEach(k => {
+    const d = state.variants[k];
+    const ms = d.map(r=>r.wall_ms||0).sort((a,b)=>a-b);
+    const total = ms.reduce((s,v)=>s+v,0);
+    const mean = total/ms.length;
+    const p50 = ms[Math.floor(ms.length*.5)];
+    const p95 = ms[Math.floor(ms.length*.95)];
+    const sp = seqTotalMs ? seqTotalMs/total : 1;
+    html += `<tr>
+      <td>${k}</td>
+      <td>${d.length}</td>
+      <td>${(total/1000).toFixed(2)}</td>
+      <td>${mean.toFixed(3)}</td>
+      <td>${p50.toFixed(3)}</td>
+      <td>${p95.toFixed(3)}</td>
+      <td style="color:${sp>=2?'#4caf7d':sp>=1?'#f5a623':'#e05252'}">${sp.toFixed(2)}×</td>
+    </tr>`;
+  });
+  tbody.innerHTML = html;
+}
+
+// ═══════════════════════════════════════════════════
+//  ANALYSIS CHARTS
+// ═══════════════════════════════════════════════════
+function renderAnalysisCharts() {
+  const seqData = state.variants['Sequential'];
+  if (!seqData) return;
+
+  if (seqData[0] && seqData[0].vocab_size !== undefined) {
+    drawLineChart('vocabChart', [{
+      label:'Vocabulary size', color:'#4c8ef5',
+      data: seqData.map(r=>({x:r.step,y:r.vocab_size||0})),
+      fill:true
+    }], {yMin:0, xLabel:'step'});
+  }
+  if (seqData[0] && seqData[0].avg_tok_len !== undefined) {
+    drawLineChart('toklenChart', [{
+      label:'Avg token length', color:'#f5a623',
+      data: seqData.map(r=>({x:r.step,y:r.avg_tok_len||0})),
+      fill:true
+    }], {yMin:0, xLabel:'step'});
+  }
+
+  renderHeatmap();
+}
+
+function renderHeatmap() {
+  const seqData = state.variants['Sequential'];
+  if (!seqData) return;
+
+  const canvas = document.getElementById('heatmapCanvas');
+  const N_BINS = 10;
+  const maxLen = 12;
+  const bins = Array.from({length:N_BINS}, ()=>new Array(maxLen+1).fill({sum:0,cnt:0}));
+
+  const maxStep = Math.max(...seqData.map(r=>r.step));
+  seqData.forEach(r => {
+    const bin = Math.floor((r.step-1)/maxStep*N_BINS);
+    const len = (String(r.pair_a).length + String(r.pair_b).length);
+    if (bin < N_BINS && len <= maxLen) {
+      const obj = bins[bin][len];
+      bins[bin][len] = {sum: obj.sum+(r.freq||0), cnt: obj.cnt+1};
+    }
+  });
+
+  const vals = bins.flatMap(b=>b.map(c=>c.cnt?c.sum/c.cnt:0));
+  const maxV = Math.max(...vals) || 1;
+
+  const dpr = window.devicePixelRatio || 1;
+  const cw = canvas.parentElement.clientWidth - 32;
+  const ch = 180;
+  canvas.width  = cw * dpr;
+  canvas.height = ch * dpr;
+  canvas.style.width  = cw + 'px';
+  canvas.style.height = ch + 'px';
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  const cellW = (cw - 40) / N_BINS;
+  const cellH = (ch - 30) / (maxLen + 1);
+
+  for (let b = 0; b < N_BINS; b++) {
+    for (let l = 0; l <= maxLen; l++) {
+      const cell = bins[b][l];
+      const v = cell.cnt ? cell.sum/cell.cnt : 0;
+      const t = v / maxV;
+      const r2 = Math.round(20 + t * 200);
+      const g2 = Math.round(40 + t * 60);
+      const b2 = Math.round(20);
+      ctx.fillStyle = `rgba(${r2},${g2},${b2},${0.2 + t*0.8})`;
+      ctx.fillRect(40 + b*cellW, ch - 30 - (l+1)*cellH, cellW-1, cellH-1);
+    }
+  }
+
+  ctx.fillStyle = '#5a6585'; ctx.font = '10px Space Mono';
+  for (let b = 0; b < N_BINS; b++) {
+    ctx.textAlign = 'center';
+    ctx.fillText(b, 40 + b*cellW + cellW/2, ch - 15);
+  }
+  for (let l = 1; l <= maxLen; l += 2) {
+    ctx.textAlign = 'right';
+    ctx.fillText(l, 36, ch - 30 - l*cellH + cellH/2 + 3);
+  }
+  ctx.fillStyle = '#3a445a';
+  ctx.textAlign = 'center';
+  ctx.fillText('Step bin →', 40 + N_BINS*cellW/2, ch - 2);
+
+  // gradient legend
+  const gc = document.getElementById('legendGrad');
+  const gctx = gc.getContext('2d');
+  const grad = gctx.createLinearGradient(0,0,140,0);
+  grad.addColorStop(0,'rgba(20,40,20,.3)');
+  grad.addColorStop(1,'rgba(220,100,20,1)');
+  gctx.fillStyle = grad;
+  gctx.fillRect(0,0,140,12);
+}
+
+function renderTopMerges() {
+  const seqData = state.variants['Sequential'];
+  const tbody = document.getElementById('topMergesBody');
+  if (!seqData) return;
+
+  const top30 = [...seqData].sort((a,b)=>(b.freq||0)-(a.freq||0)).slice(0,30);
+  const maxF = top30[0]?.freq || 1;
+  tbody.innerHTML = top30.map((r,i) => {
+    const pct = (((r.freq||0)/maxF)*100).toFixed(1);
+    return `<tr>
+      <td>${i+1}</td>
+      <td>${r.step}</td>
+      <td><span class="merge-cell">${r.pair_a}</span></td>
+      <td><span class="merge-cell">${r.pair_b}</span></td>
+      <td><span class="merge-cell" style="color:#4c8ef5">${r.pair_a}${r.pair_b}</span></td>
+      <td>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="width:${pct}px;height:6px;background:#4c8ef5;border-radius:2px;opacity:.7"></div>
+          ${(r.freq||0).toLocaleString()}
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+// ═══════════════════════════════════════════════════
+//  DEMO DATA (auto-load sample if no files)
+// ═══════════════════════════════════════════════════
+function loadDemoData() {
+  // Generate synthetic BPE results for demo
+  const variants = {
+    'Sequential': { base: 45, scale: 1.0 },
+    'OMP-2t':     { base: 25, scale: 0.95 },
+    'OMP-4t':     { base: 14, scale: 0.9 },
+    'MPI-2p':     { base: 22, scale: 0.92 },
+    'MPI-4p':     { base: 12, scale: 0.85 },
+    'CUDA':       { base: 8,  scale: 0.98 },
+  };
+
+  // Common pairs (approximating PTB BPE)
+  const pairs = [
+    ['t','h'],['h','e'],['in','g'],['e','r'],['a','n'],
+    ['o','n'],['e','d'],['th','e'],['i','n'],['re','s'],
+    ['s','t'],['a','t'],['l','e'],['i','t'],['o','f'],
+    ['e','n'],['a','r'],['o','r'],['n','d'],['c','e'],
+    ['i','s'],['t','er'],['a','l'],['i','c'],['r','e'],
+    ['d','e'],['s','e'],['he','r'],['c','o'],['m','e'],
+  ];
+
+  Object.entries(variants).forEach(([label, cfg]) => {
+    const rows = [];
+    let vocabSize = 250;
+    let avgLen = 1.0;
+    for (let step = 1; step <= 300; step++) {
+      const pair = pairs[step % pairs.length];
+      const decay = 1 / Math.log(step + 2);
+      const freq = Math.round(2000 * decay + Math.random() * 200);
+      const noise = (Math.random() - 0.5) * cfg.base * 0.3;
+      const wallMs = Math.max(1, cfg.base * cfg.scale + noise + step * 0.02);
+      vocabSize += step < 50 ? 2 : step < 150 ? 1 : 0.5;
+      avgLen = 1 + step * 0.008;
+      const row = {
+        step, pair_a: pair[0], pair_b: pair[1], freq,
+        wall_ms: parseFloat(wallMs.toFixed(3)),
+      };
+      if (label === 'Sequential') {
+        row.vocab_size = Math.round(vocabSize);
+        row.avg_tok_len = parseFloat(avgLen.toFixed(4));
+      }
+      rows.push(row);
+    }
+    state.variants[label] = rows;
+    addFileBadge(label);
+  });
+
+  const notice = document.createElement('div');
+  notice.style.cssText = 'background:#1a2030;border:1px solid #2a3555;border-radius:6px;padding:10px 16px;margin-bottom:12px;font-size:11px;color:#5a6585;';
+  notice.innerHTML = '⚡ <strong style="color:#4c8ef5">Demo mode</strong> — showing synthetic BPE data. Drop your own CSV files from Colab to see real results.';
+  document.querySelector('.content').insertBefore(notice, document.getElementById('panel-overview').firstChild);
+}
+
+// Init
+loadDemoData();
+refreshAll();
+</script>
+</body>
+</html>
